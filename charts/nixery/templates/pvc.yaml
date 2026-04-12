@@ -1,0 +1,17 @@
+{{- if and (eq .Values.storage.backend "filesystem") .Values.storage.filesystem.persistence.enabled (not .Values.storage.filesystem.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "nixery.fullname" . }}-data
+  labels:
+    {{- include "nixery.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.storage.filesystem.persistence.size }}
+  {{- with .Values.storage.filesystem.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+{{- end }}

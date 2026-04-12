@@ -1,0 +1,16 @@
+apiVersion: v2
+name: nixery
+description: Helm chart for Nixery — a Docker-compatible registry that builds images with Nix
+type: application
+version: 0.1.0
+appVersion: "bdc51e7fe8f1ceb2138e5126dad2cb9ace8f2928"
+keywords:
+  - nixery
+  - nix
+  - registry
+  - oci
+home: https://nixery.dev
+sources:
+  - https://github.com/tazjin/nixery
+maintainers:
+  - name: Zachary Spar

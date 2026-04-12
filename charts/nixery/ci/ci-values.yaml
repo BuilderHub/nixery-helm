@@ -1,0 +1,46 @@
+# Values for CI (Kind), `helm lint -f`, and `helm template` smoke tests.
+# Keep repository:tag in sync with NIXERY_IMAGE in .github/workflows/on-pr.yaml (Kind loads that image locally).
+replicaCount: 1
+
+fullnameOverride: nixery-ci
+
+image:
+  repository: ghcr.io/builderhub/nixery-helm/nixery
+  tag: 1c4f75544b1452c4b9ee5c7e3dd2eea8f0f2a2d6
+  # Use local image after `kind load` in CI; avoids re-pulling private GHCR inside the cluster.
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+nixery:
+  channel: "nixpkgs-unstable"
+  pkgsRepo: ""
+  pkgsPath: ""
+  timeout: "3600"
+
+storage:
+  backend: filesystem
+  filesystem:
+    storagePath: /var/lib/nixery-storage
+    emptyDir:
+      enabled: true
+      sizeLimit: 8Gi
+    persistence:
+      enabled: false
+
+tmp:
+  emptyDir:
+    enabled: true
+    sizeLimit: 8Gi
+
+podDisruptionBudget:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    memory: 4Gi

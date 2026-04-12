@@ -1,0 +1,120 @@
+# For HA, use storage.backend s3 or gcs and replicaCount > 1.
+replicaCount: 1
+
+image:
+  repository: ghcr.io/builderhub/nixery-helm/nixery
+  tag: 1c4f75544b1452c4b9ee5c7e3dd2eea8f0f2a2d6
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: true
+
+podAnnotations: {}
+
+podSecurityContext: {}
+
+# Optional pod runtime (e.g. kata for VM-isolated privileged workloads). Requires a cluster RuntimeClass.
+runtimeClassName: ""
+
+# Nix builds need broad sandbox access; seccomp Unconfined + privileged avoids BPF/prctl failures
+# in many Kubernetes/container runtimes (HTTP 500 on pull otherwise).
+securityContext:
+  privileged: true
+  seccompProfile:
+    type: Unconfined
+
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: nixery.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+topologySpreadConstraints: []
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: ""
+
+nixery:
+  channel: "nixpkgs-unstable"
+  pkgsRepo: ""
+  pkgsPath: ""
+  timeout: "3600"
+  popularityUrl: ""
+  # Appended to nix.conf via NIX_CONFIG. Nix 2.31+ can still use seccomp when filter-syscalls is true, which breaks in many containers.
+  nixConfig: |
+    sandbox = false
+    filter-syscalls = false
+  extraEnv: []
+
+storage:
+  backend: filesystem
+  s3:
+    bucket: ""
+    endpoint: ""
+    region: ""
+    existingSecret: ""
+    accessKeyKey: "access-key-id"
+    secretKeyKey: "secret-access-key"
+    createSecret: false
+    accessKey: ""
+    secretKey: ""
+  gcs:
+    bucket: ""
+    existingSecret: ""
+    credentialsKey: "credentials.json"
+    mountPath: /var/secrets/google
+  filesystem:
+    storagePath: /var/lib/nixery-storage
+    emptyDir:
+      enabled: true
+      sizeLimit: ""
+    persistence:
+      enabled: false
+      existingClaim: ""
+      storageClass: ""
+      size: 20Gi
+
+tmp:
+  emptyDir:
+    enabled: true
+    medium: ""
+    sizeLimit: ""
+
+extraVolumes: []
+extraVolumeMounts: []
+
+extraEnvFrom: []

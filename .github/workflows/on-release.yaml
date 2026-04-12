@@ -1,0 +1,51 @@
+---
+name: On Release
+
+"on":
+  release:
+    types:
+      - published
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.20.2
+
+      - name: Helm lint
+        run: helm lint charts/nixery -f charts/nixery/ci/ci-values.yaml
+
+      - name: Package chart
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          CHART_VERSION="${TAG#v}"
+          helm package charts/nixery --version "$CHART_VERSION" --app-version "$CHART_VERSION"
+
+      - name: Log in to GHCR (Helm OCI)
+        run: |
+          echo "${{ github.token }}" | helm registry login ghcr.io \
+            -u "${{ github.actor }}" \
+            --password-stdin
+
+      - name: Push chart to GHCR
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          CHART_VERSION="${TAG#v}"
+          helm push "nixery-${CHART_VERSION}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/nixery-helm"
+

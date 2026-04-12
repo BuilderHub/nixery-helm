@@ -1,35 +1,37 @@
 # nixery-helm
 
-Helm chart for [Nixery](https://github.com/tazjin/nixery): a registry that builds container images from Nix on demand. Wire it up with object storage for high availability.
+Helm chart for [Nixery](https://github.com/tazjin/nixery): a registry that builds container images from Nix on demand. Use object storage in `values.yaml` when you want multiple replicas and shared layers.
 
 > [!CAUTION]
 > This chart’s defaults assume a **privileged** container, **unconfined seccomp**, and permissive Nix settings so on-demand image builds work. That makes the pod **high-trust on the node**. For production or shared clusters, use **strong isolation** appropriate to your threat model—for example set **`runtimeClassName`** to a **`RuntimeClass`** such as [Kata Containers](https://katacontainers.io/), run on dedicated nodes, or combine with policy and other controls.
 
 ## Quickstart
 
+Defaults are a single replica, filesystem-backed storage, ClusterIP service on port `8080`, and the image/tag from [`charts/nixery/values.yaml`](charts/nixery/values.yaml).
+
 From a clone of this repo:
 
 ```bash
 helm upgrade --install nixery ./charts/nixery \
-  --namespace nixery --create-namespace \
-  --set service.port=8080 \
-  --set storage.backend=s3 \
-  --set storage.s3.bucket=YOUR_BUCKET \
-  --set storage.s3.region=us-east-1 \
-  --set storage.s3.existingSecret=YOUR_S3_CREDENTIALS_SECRET \
-  --set replicaCount=2
+  --namespace nixery --create-namespace
 ```
 
-Create the Kubernetes secret first if you use `storage.s3.existingSecret`; keys default to `access-key-id` and `secret-access-key` (override with `storage.s3.accessKeyKey` / `secretKeyKey` if yours differ). On AWS you can skip static keys and use IRSA instead: annotate the service account (`serviceAccount.annotations`) with the role ARN and leave the secret empty.
-
-From GHCR (Helm 3.8+):
+From GHCR (Helm 3.8+); set `--version` to a published chart tag:
 
 ```bash
 helm upgrade --install nixery oci://ghcr.io/builderhub/nixery-helm/chart/nixery \
   --version X.Y.Z \
-  --namespace nixery --create-namespace \
-  -f your-values.yaml
+  --namespace nixery --create-namespace
 ```
+
+Check the registry API (release name and chart name both `nixery` yields Service `nixery`):
+
+```bash
+kubectl port-forward -n nixery svc/nixery 8080:8080
+curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/v2/
+```
+
+For S3/GCS, more replicas, ingress, or other options, use the values reference below.
 
 ## Values reference
 
@@ -38,7 +40,7 @@ These are the knobs people actually touch. See [`charts/nixery/values.yaml`](cha
 | Key | What it does |
 |-----|----------------|
 | `replicaCount` | Pod count. Use `1` with `filesystem` storage; use `2+` only with `s3` or `gcs` so layers are shared. |
-| `image.repository` | Container image (default `ghcr.io/builderhub/nixery-helm/nixery`. |
+| `image.repository` | Container image (default `ghcr.io/builderhub/nixery-helm/nixery`). |
 | `image.tag` | Image tag. |
 | `image.pullPolicy` | Kubernetes pull policy. |
 | `imagePullSecrets` | Pull secrets for private registries. |

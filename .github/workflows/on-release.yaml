@@ -29,7 +29,7 @@ jobs:
 
       - name: Package chart
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
           CHART_VERSION="${TAG#v}"
@@ -43,9 +43,9 @@ jobs:
 
       - name: Push chart to GHCR
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
           CHART_VERSION="${TAG#v}"
-          helm push "nixery-${CHART_VERSION}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/nixery-helm"
+          helm push "nixery-${CHART_VERSION}.tgz" "oci://ghcr.io/builderhub/nixery-helm/chart"
 

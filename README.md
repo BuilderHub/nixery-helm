@@ -29,7 +29,7 @@ Create the Kubernetes secret first if you use `storage.s3.existingSecret`; keys 
 From GHCR (Helm 3.8+):
 
 ```bash
-helm upgrade --install nixery oci://ghcr.io/builderhub/nixery-helm/nixery \
+helm upgrade --install nixery oci://ghcr.io/builderhub/nixery-helm/chart/nixery \
   --version X.Y.Z \
   --namespace nixery --create-namespace \
   -f your-values.yaml

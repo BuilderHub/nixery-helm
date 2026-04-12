@@ -1,0 +1,129 @@
+---
+name: Build Nixery (Nix)
+
+"on":
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Image tag (leave empty to use the workflow commit SHA)
+        type: string
+        required: false
+        default: ""
+      nixery-repository:
+        description: "Upstream repo to build (owner/name)"
+        type: string
+        required: false
+        default: "tazjin/nixery"
+      nixery-ref:
+        description: Git ref (branch or tag) to checkout
+        type: string
+        required: false
+        default: "master"
+      image-repository:
+        description: "Destination image without tag (empty = ghcr.io/<github.repository>/nixery, lowercase)"
+        type: string
+        required: false
+        default: ""
+      nixpkgs-archive:
+        description: "nixpkgs tarball URL (imported as <nixpkgs> for the build)"
+        type: string
+        required: false
+        default: "https://github.com/NixOS/nixpkgs/archive/nixpkgs-unstable.tar.gz"
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: false
+        default: ""
+      nixery-repository:
+        type: string
+        required: false
+        default: "tazjin/nixery"
+      nixery-ref:
+        type: string
+        required: false
+        default: "master"
+      image-repository:
+        type: string
+        required: false
+        default: ""
+      nixpkgs-archive:
+        type: string
+        required: false
+        default: "https://github.com/NixOS/nixpkgs/archive/nixpkgs-unstable.tar.gz"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  nix-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    steps:
+      - name: Resolve tag and image name
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_IMAGE_REPO: ${{ inputs['image-repository'] }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG}"
+          if [ -z "${TAG}" ]; then
+            TAG="${GITHUB_SHA}"
+          fi
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+
+          IR="${INPUT_IMAGE_REPO}"
+          if [ -z "${IR}" ]; then
+            REPO_LC="$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+            IR="ghcr.io/${REPO_LC}/nixery"
+          fi
+          echo "image=${IR}" >> "${GITHUB_OUTPUT}"
+
+          REG_HOST="${IR%%/*}"
+          echo "registry_host=${REG_HOST}" >> "${GITHUB_OUTPUT}"
+
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs['nixery-repository'] }}
+          ref: ${{ inputs['nixery-ref'] }}
+          path: nixery
+
+      - uses: DeterminateSystems/nix-installer-action@v22
+
+      # Binary cache for /nix/store via GitHub Actions cache (needs id-token: write)
+      - uses: DeterminateSystems/magic-nix-cache-action@v13
+
+      - name: Build nixery-image
+        env:
+          NIXPKGS_ARCHIVE: ${{ inputs['nixpkgs-archive'] }}
+        run: |
+          set -euo pipefail
+          export NIX_PATH="nixpkgs=${NIXPKGS_ARCHIVE}"
+          # dockerTools layer builds often hit sandbox restrictions on hosted runners
+          nix-build -E '(import ./nixery/default.nix { pkgs = import <nixpkgs> {}; }).nixery-image' \
+            --option sandbox false \
+            --max-jobs 2
+          ls -lh result
+
+      - name: Log in to registry
+        run: |
+          set -euo pipefail
+          echo "${{ github.token }}" | docker login "${{ steps.meta.outputs.registry_host }}" \
+            -u "${{ github.actor }}" \
+            --password-stdin
+
+      - name: Load, tag, and push
+        env:
+          DEST: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          TARBALL="$(readlink -f result)"
+          LOADED="$(docker load -i "${TARBALL}" | sed -n 's/^Loaded image: //p')"
+          test -n "${LOADED}"
+          docker tag "${LOADED}" "${DEST}"
+          docker push "${DEST}"

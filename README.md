@@ -1,8 +1,6 @@
 # nixery-helm
 
-Helm chart for [Nixery](https://github.com/tazjin/nixery): a registry that builds container images from Nix on demand. Wire it up with object storage if you want more than one replica, because layers need to live somewhere everyone can read.
-
-Chart defaults point at a Nixery image on GHCR and port `8080`. CI still uses [`charts/nixery/ci/ci-values.yaml`](charts/nixery/ci/ci-values.yaml) with Docker Distribution for Kind.
+Helm chart for [Nixery](https://github.com/tazjin/nixery): a registry that builds container images from Nix on demand. Wire it up with object storage for high availability.
 
 > [!CAUTION]
 > This chart’s defaults assume a **privileged** container, **unconfined seccomp**, and permissive Nix settings so on-demand image builds work. That makes the pod **high-trust on the node**. For production or shared clusters, use **strong isolation** appropriate to your threat model—for example set **`runtimeClassName`** to a **`RuntimeClass`** such as [Kata Containers](https://katacontainers.io/), run on dedicated nodes, or combine with policy and other controls.
@@ -14,8 +12,6 @@ From a clone of this repo:
 ```bash
 helm upgrade --install nixery ./charts/nixery \
   --namespace nixery --create-namespace \
-  --set image.repository=YOUR_REGISTRY/nixery \
-  --set image.tag=YOUR_TAG \
   --set service.port=8080 \
   --set storage.backend=s3 \
   --set storage.s3.bucket=YOUR_BUCKET \
@@ -42,7 +38,7 @@ These are the knobs people actually touch. See [`charts/nixery/values.yaml`](cha
 | Key | What it does |
 |-----|----------------|
 | `replicaCount` | Pod count. Use `1` with `filesystem` storage; use `2+` only with `s3` or `gcs` so layers are shared. |
-| `image.repository` | Container image (default `ghcr.io/builderhub/nixery-helm/nixery`; override for your registry). |
+| `image.repository` | Container image (default `ghcr.io/builderhub/nixery-helm/nixery`. |
 | `image.tag` | Image tag. |
 | `image.pullPolicy` | Kubernetes pull policy. |
 | `imagePullSecrets` | Pull secrets for private registries. |
@@ -92,3 +88,4 @@ These are the knobs people actually touch. See [`charts/nixery/values.yaml`](cha
 ## License
 
 MIT — see [LICENSE](LICENSE).
+

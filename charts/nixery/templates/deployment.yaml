@@ -1,0 +1,207 @@
+{{- include "nixery.validateFilesystemReplicas" . }}
+{{- include "nixery.validatePkgSource" . }}
+{{- include "nixery.validateStorage" . }}
+{{- include "nixery.validateFilesystemVolumes" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nixery.fullname" . }}
+  labels:
+    {{- include "nixery.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "nixery.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "nixery.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "nixery.serviceAccountName" . }}
+      {{- with .Values.runtimeClassName }}
+      runtimeClassName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: nixery
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          env:
+            - name: PORT
+              value: {{ .Values.service.port | quote }}
+            - name: NIXERY_STORAGE_BACKEND
+              value: {{ .Values.storage.backend | quote }}
+            - name: NIX_TIMEOUT
+              value: {{ .Values.nixery.timeout | quote }}
+            - name: NIX_CONFIG
+              value: {{ .Values.nixery.nixConfig | default "sandbox = false\nfilter-syscalls = false" | quote }}
+            {{- if .Values.nixery.popularityUrl }}
+            - name: NIX_POPULARITY_URL
+              value: {{ .Values.nixery.popularityUrl | quote }}
+            {{- end }}
+            {{- $ch := .Values.nixery.channel | default "" | trim }}
+            {{- $repo := .Values.nixery.pkgsRepo | default "" | trim }}
+            {{- $path := .Values.nixery.pkgsPath | default "" | trim }}
+            {{- if ne $ch "" }}
+            - name: NIXERY_CHANNEL
+              value: {{ $ch | quote }}
+            {{- end }}
+            {{- if ne $repo "" }}
+            - name: NIXERY_PKGS_REPO
+              value: {{ $repo | quote }}
+            {{- end }}
+            {{- if ne $path "" }}
+            - name: NIXERY_PKGS_PATH
+              value: {{ $path | quote }}
+            {{- end }}
+            {{- if eq .Values.storage.backend "s3" }}
+            - name: S3_BUCKET
+              value: {{ .Values.storage.s3.bucket | quote }}
+            {{- if .Values.storage.s3.endpoint }}
+            - name: S3_ENDPOINT
+              value: {{ .Values.storage.s3.endpoint | quote }}
+            {{- end }}
+            {{- if .Values.storage.s3.region }}
+            - name: AWS_REGION
+              value: {{ .Values.storage.s3.region | quote }}
+            {{- end }}
+            {{- $s3sec := "" }}
+            {{- if .Values.storage.s3.existingSecret }}
+            {{- $s3sec = .Values.storage.s3.existingSecret }}
+            {{- else if .Values.storage.s3.createSecret }}
+            {{- $s3sec = printf "%s-s3" (include "nixery.fullname" .) }}
+            {{- end }}
+            {{- if $s3sec }}
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $s3sec }}
+                  key: {{ .Values.storage.s3.accessKeyKey }}
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $s3sec }}
+                  key: {{ .Values.storage.s3.secretKeyKey }}
+            {{- end }}
+            {{- end }}
+            {{- if eq .Values.storage.backend "gcs" }}
+            - name: GCS_BUCKET
+              value: {{ .Values.storage.gcs.bucket | quote }}
+            {{- if .Values.storage.gcs.existingSecret }}
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: {{ printf "%s/%s" .Values.storage.gcs.mountPath .Values.storage.gcs.credentialsKey | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if eq .Values.storage.backend "filesystem" }}
+            - name: STORAGE_PATH
+              value: {{ .Values.storage.filesystem.storagePath | quote }}
+            {{- end }}
+            {{- with .Values.nixery.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /v2/
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /v2/
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            {{- if and (eq .Values.storage.backend "gcs") .Values.storage.gcs.existingSecret }}
+            - name: gcs-credentials
+              mountPath: {{ .Values.storage.gcs.mountPath }}
+              readOnly: true
+            {{- end }}
+            {{- if eq .Values.storage.backend "filesystem" }}
+            - name: nixery-data
+              mountPath: {{ .Values.storage.filesystem.storagePath }}
+            {{- end }}
+            {{- if .Values.tmp.emptyDir.enabled }}
+            - name: tmp
+              mountPath: /tmp
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        {{- if and (eq .Values.storage.backend "gcs") .Values.storage.gcs.existingSecret }}
+        - name: gcs-credentials
+          secret:
+            secretName: {{ .Values.storage.gcs.existingSecret }}
+        {{- end }}
+        {{- if eq .Values.storage.backend "filesystem" }}
+        - name: nixery-data
+          {{- if .Values.storage.filesystem.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.storage.filesystem.persistence.existingClaim | default (printf "%s-data" (include "nixery.fullname" .)) }}
+          {{- else if .Values.storage.filesystem.emptyDir.enabled }}
+          emptyDir:
+            {{- if .Values.storage.filesystem.emptyDir.sizeLimit }}
+            sizeLimit: {{ .Values.storage.filesystem.emptyDir.sizeLimit }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+        {{- if .Values.tmp.emptyDir.enabled }}
+        - name: tmp
+          emptyDir:
+            {{- if .Values.tmp.emptyDir.medium }}
+            medium: {{ .Values.tmp.emptyDir.medium | quote }}
+            {{- end }}
+            {{- if .Values.tmp.emptyDir.sizeLimit }}
+            sizeLimit: {{ .Values.tmp.emptyDir.sizeLimit }}
+            {{- end }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

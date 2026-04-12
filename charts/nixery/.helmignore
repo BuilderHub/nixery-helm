@@ -1,0 +1,6 @@
+# VCS
+.git/
+.gitignore
+
+# CI / local
+ci/

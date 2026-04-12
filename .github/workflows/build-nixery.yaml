@@ -58,7 +58,15 @@ defaults:
 
 jobs:
   nix-build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: amd64
+            runs-on: ubuntu-latest
+          - platform: arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
     permissions:
       contents: read
       id-token: write
@@ -117,13 +125,61 @@ jobs:
             -u "${{ github.actor }}" \
             --password-stdin
 
-      - name: Load, tag, and push
+      - name: Load, tag, and push (per-arch)
         env:
-          DEST: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+          DEST_ARCH: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}-${{ matrix.platform }}
         run: |
           set -euo pipefail
           TARBALL="$(readlink -f result)"
           LOADED="$(docker load -i "${TARBALL}" | sed -n 's/^Loaded image: //p')"
           test -n "${LOADED}"
-          docker tag "${LOADED}" "${DEST}"
-          docker push "${DEST}"
+          docker tag "${LOADED}" "${DEST_ARCH}"
+          docker push "${DEST_ARCH}"
+
+  manifest:
+    needs: nix-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Resolve tag and image name
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_IMAGE_REPO: ${{ inputs['image-repository'] }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG}"
+          if [ -z "${TAG}" ]; then
+            TAG="${GITHUB_SHA}"
+          fi
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+
+          IR="${INPUT_IMAGE_REPO}"
+          if [ -z "${IR}" ]; then
+            REPO_LC="$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+            IR="ghcr.io/${REPO_LC}/nixery"
+          fi
+          echo "image=${IR}" >> "${GITHUB_OUTPUT}"
+
+          REG_HOST="${IR%%/*}"
+          echo "registry_host=${REG_HOST}" >> "${GITHUB_OUTPUT}"
+
+      - name: Log in to registry
+        run: |
+          set -euo pipefail
+          echo "${{ github.token }}" | docker login "${{ steps.meta.outputs.registry_host }}" \
+            -u "${{ github.actor }}" \
+            --password-stdin
+
+      - name: Create and push multi-arch manifest
+        env:
+          DEST: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+          DEST_AMD64: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}-amd64
+          DEST_ARM64: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}-arm64
+        run: |
+          set -euo pipefail
+          docker buildx version
+          docker buildx imagetools create -t "${DEST}" "${DEST_AMD64}" "${DEST_ARM64}"
+          docker buildx imagetools inspect "${DEST}"

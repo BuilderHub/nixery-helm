@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ printf "%s-test-connection" (include "nixery.fullname" .) | quote }}
+  labels:
+    {{- include "nixery.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: hook-succeeded,before-hook-creation
+spec:
+  restartPolicy: Never
+  containers:
+    - name: curl
+      image: docker.io/curlimages/curl:8.5.0
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          curl -sfS "http://{{ include "nixery.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}/v2/" >/dev/null
+          echo "OK"

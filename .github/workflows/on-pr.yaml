@@ -1,0 +1,100 @@
+---
+name: On PR
+
+"on":
+  pull_request:
+    paths:
+      - "charts/**"
+      - ".github/workflows/on-pr.yaml"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test-chart:
+    runs-on: ${{ matrix.runs-on }}
+    env:
+      # Port on the runner for kubectl port-forward (HTTP registry; must match insecure-registries).
+      NIXERY_PULL_PORT: "15555"
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      matrix:
+        runs-on:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.20.2
+
+      - name: Helm lint
+        run: helm lint charts/nixery -f charts/nixery/ci/ci-values.yaml
+
+      - name: Helm template (CI values)
+        run: helm template pr charts/nixery -f charts/nixery/ci/ci-values.yaml >/tmp/rendered.yaml
+
+      # Must run before Kind: restarting Docker later would tear down the cluster.
+      - name: Configure Docker insecure registry (HTTP via port-forward)
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /etc/docker
+          echo "{\"insecure-registries\":[\"127.0.0.1:${NIXERY_PULL_PORT}\"]}" | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker || sudo service docker restart
+          sleep 5
+          docker info >/dev/null
+
+      - name: Create KinD cluster
+        uses: helm/kind-action@v1.14.0
+
+      - name: Pull Nixery image and load into Kind
+        env:
+          NIXERY_IMAGE: ghcr.io/builderhub/nixery-helm/nixery:bdc51e7fe8f1ceb2138e5126dad2cb9ace8f2928
+        run: |
+          set -euo pipefail
+          docker pull "$NIXERY_IMAGE"
+          kind load docker-image "$NIXERY_IMAGE" --name chart-testing
+
+      - name: Install chart
+        run: |
+          helm upgrade --install nixery-ci charts/nixery \
+            -f charts/nixery/ci/ci-values.yaml \
+            --namespace nixery-test \
+            --create-namespace \
+            --wait --timeout 20m
+
+      - name: Rollout status
+        run: kubectl -n nixery-test rollout status deploy/nixery-ci --timeout=20m
+
+      - name: Verify registry image pulls (shell + arm64/shell)
+        timeout-minutes: 60
+        run: |
+          set -euo pipefail
+          REGISTRY="127.0.0.1:${NIXERY_PULL_PORT}"
+          kubectl -n nixery-test port-forward "svc/nixery-ci" "${NIXERY_PULL_PORT}:8080" &
+          PF_PID=$!
+          trap 'kill ${PF_PID} 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if curl -sfS --max-time 5 "http://${REGISTRY}/v2/" >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -sfS "http://${REGISTRY}/v2/" >/dev/null
+          export DOCKER_CLIENT_TIMEOUT=3600
+          docker pull "${REGISTRY}/shell:latest"
+          docker pull "${REGISTRY}/arm64/shell:latest"
+
+      - name: Debug cluster
+        if: always()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl -n nixery-test get events --sort-by='.lastTimestamp' || true
+          kubectl -n nixery-test describe pod -l app.kubernetes.io/name=nixery || true
+          kubectl -n nixery-test logs -l app.kubernetes.io/name=nixery --tail=200 || true
+

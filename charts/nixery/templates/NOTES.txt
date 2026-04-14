@@ -19,8 +19,10 @@ Default image and port are set in values.yaml (Nixery on 8080). Override image.*
   echo "Visit http://127.0.0.1:{{ .Values.service.port }}"
 {{- end }}
 
-2. Verify the registry API:
+2. Verify the OCI distribution v2 API (`GET /v2/`) returns 200 OK (after port-forward or from the URL above):
    curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:{{ .Values.service.port }}/v2/
+   The response body is empty; the printed status code should be 200. To fail the command on any non-success HTTP status:
+   curl -fsS http://127.0.0.1:{{ .Values.service.port }}/v2/ -o /dev/null
 
 3. Storage:
 {{- if eq .Values.storage.backend "filesystem" }}
@@ -30,7 +32,3 @@ Default image and port are set in values.yaml (Nixery on 8080). Override image.*
 {{- else if eq .Values.storage.backend "gcs" }}
    GCS backend: set storage.gcs.existingSecret for a key mounted as GOOGLE_APPLICATION_CREDENTIALS, or rely on workload identity.
 {{- end }}
-
-4. Nixery runs Nix builds in-container: default nixery.nixConfig sets sandbox=false and filter-syscalls=false; securityContext uses privileged + unconfined seccomp (see values).
-
-5. Defaults are high-trust on the node; see the README caution on isolation (e.g. runtimeClassName with Kata).

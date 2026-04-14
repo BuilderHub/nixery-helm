@@ -2,9 +2,6 @@
 
 Helm chart for [Nixery](https://github.com/tazjin/nixery): a registry that builds container images from Nix on demand. Use object storage in `values.yaml` when you want multiple replicas and shared layers.
 
-> [!CAUTION]
-> This chart’s defaults assume a **privileged** container, **unconfined seccomp**, and permissive Nix settings so on-demand image builds work. That makes the pod **high-trust on the node**. For production or shared clusters, use **strong isolation** appropriate to your threat model—for example set **`runtimeClassName`** to a **`RuntimeClass`** such as [Kata Containers](https://katacontainers.io/), run on dedicated nodes, or combine with policy and other controls.
-
 ## Quickstart
 
 Defaults are a single replica, filesystem-backed storage, ClusterIP service on port `8080`, and the image/tag from [`charts/nixery/values.yaml`](charts/nixery/values.yaml).
@@ -51,7 +48,6 @@ These are the knobs people actually touch. See [`charts/nixery/values.yaml`](cha
 | `serviceAccount.automountServiceAccountToken` | Whether to mount the API token. |
 | `podAnnotations` | Extra pod annotations. |
 | `podSecurityContext` | Pod-level `securityContext`. |
-| `securityContext` | Container-level `securityContext`. |
 | `runtimeClassName` | Pod `runtimeClassName` (e.g. Kata) for VM or alternate runtime isolation; cluster must define the `RuntimeClass`. |
 | `service.type` | `ClusterIP`, `NodePort`, `LoadBalancer`, etc. |
 | `service.port` | Service port and `PORT` env (must match what the process listens on). |
@@ -69,6 +65,8 @@ These are the knobs people actually touch. See [`charts/nixery/values.yaml`](cha
 | `nixery.pkgsPath` | `NIXERY_PKGS_PATH` — local path inside the image (unusual in Kubernetes). |
 | `nixery.timeout` | `NIX_TIMEOUT` (seconds per Nix build). |
 | `nixery.popularityUrl` | `NIX_POPULARITY_URL` if you use popularity data. |
+| `nixery.nixConfig` | Extra `nix.conf` lines merged into the `NIX_CONFIG` environment variable. |
+| `nixery.securityContext` | Optional container-level `securityContext`. |
 | `nixery.extraEnv` | Extra `env` entries (list of name/value or valueFrom maps). |
 | `storage.backend` | `filesystem`, `s3`, or `gcs`. |
 | `storage.s3.bucket` | Required for S3. |

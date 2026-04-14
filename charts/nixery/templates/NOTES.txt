@@ -1,36 +1,5 @@
-Default image and port are set in values.yaml (Nixery on 8080). Override image.* and storage for your environment.
+1. Port-forward the service:
+   kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "nixery.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
 
-1. Get the application URL by running these commands:
-{{- if .Values.ingress.enabled }}
-{{- range $host := .Values.ingress.hosts }}
-  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}{{ (index $host.paths 0).path }}
-{{- end }}
-{{- else if contains "NodePort" .Values.service.type }}
-  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "nixery.fullname" . }})
-  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
-  echo http://$NODE_IP:$NODE_PORT
-{{- else if contains "LoadBalancer" .Values.service.type }}
-     NOTE: It may take a few minutes for the LoadBalancer IP to be available.
-           You can watch its status by running 'kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "nixery.fullname" . }}'
-  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "nixery.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
-  echo http://$SERVICE_IP:{{ .Values.service.port }}
-{{- else if contains "ClusterIP" .Values.service.type }}
-  kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "nixery.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
-  echo "Visit http://127.0.0.1:{{ .Values.service.port }}"
-{{- end }}
-
-2. Verify the registry API:
+2. Verify the registry v2 API (`GET /v2/`) returns 200 OK:
    curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:{{ .Values.service.port }}/v2/
-
-3. Storage:
-{{- if eq .Values.storage.backend "filesystem" }}
-   Filesystem backend: use replicaCount 1 only. Layers are not shared between pods.
-{{- else if eq .Values.storage.backend "s3" }}
-   S3 backend: ensure credentials via IRSA/instance role or storage.s3.existingSecret / optional chart secret.
-{{- else if eq .Values.storage.backend "gcs" }}
-   GCS backend: set storage.gcs.existingSecret for a key mounted as GOOGLE_APPLICATION_CREDENTIALS, or rely on workload identity.
-{{- end }}
-
-4. Nixery runs Nix builds in-container: default nixery.nixConfig sets sandbox=false and filter-syscalls=false; securityContext uses privileged + unconfined seccomp (see values).
-
-5. Defaults are high-trust on the node; see the README caution on isolation (e.g. runtimeClassName with Kata).

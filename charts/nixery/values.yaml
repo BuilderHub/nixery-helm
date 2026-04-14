@@ -21,15 +21,8 @@ podAnnotations: {}
 
 podSecurityContext: {}
 
-# Optional pod runtime (e.g. kata for VM-isolated privileged workloads). Requires a cluster RuntimeClass.
+# Optional pod runtime (e.g. kata for stronger workload isolation). Requires a cluster RuntimeClass.
 runtimeClassName: ""
-
-# Nix builds need broad sandbox access; seccomp Unconfined + privileged avoids BPF/prctl failures
-# in many Kubernetes/container runtimes (HTTP 500 on pull otherwise).
-securityContext:
-  privileged: true
-  seccompProfile:
-    type: Unconfined
 
 service:
   type: ClusterIP
@@ -74,10 +67,12 @@ nixery:
   pkgsPath: ""
   timeout: "3600"
   popularityUrl: ""
-  # Appended to nix.conf via NIX_CONFIG. Nix 2.31+ can still use seccomp when filter-syscalls is true, which breaks in many containers.
+  # Optional container securityContext. Null: not rendered; Kubernetes defaults apply (non-privileged).
+  securityContext: null
+  # Appended to nix.conf via NIX_CONFIG. Stricter sandboxing; relax if builds fail on your cluster.
   nixConfig: |
-    sandbox = false
-    filter-syscalls = false
+    sandbox = true
+    filter-syscalls = true
   extraEnv: []
 
 storage:

@@ -52,7 +52,7 @@ spec:
       {{- end }}
       containers:
         - name: nixery
-          {{- with .Values.securityContext }}
+          {{- with .Values.nixery.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -70,7 +70,7 @@ spec:
             - name: NIX_TIMEOUT
               value: {{ .Values.nixery.timeout | quote }}
             - name: NIX_CONFIG
-              value: {{ .Values.nixery.nixConfig | default "sandbox = false\nfilter-syscalls = false" | quote }}
+              value: {{ .Values.nixery.nixConfig | default "sandbox = true\nfilter-syscalls = true" | quote }}
             {{- if .Values.nixery.popularityUrl }}
             - name: NIX_POPULARITY_URL
               value: {{ .Values.nixery.popularityUrl | quote }}

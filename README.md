@@ -16,7 +16,7 @@ helm upgrade --install nixery ./charts/nixery \
 From GHCR (Helm 3.8+); set `--version` to a published chart tag:
 
 ```bash
-helm upgrade --install nixery oci://ghcr.io/builderhub/nixery-helm/chart/nixery \
+helm upgrade --install nixery oci://ghcr.io/builderhub/nixery-helm/charts/nixery \
   --version X.Y.Z \
   --namespace nixery --create-namespace
 ```

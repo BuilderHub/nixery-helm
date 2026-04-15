@@ -47,5 +47,5 @@ jobs:
         run: |
           set -euo pipefail
           CHART_VERSION="${TAG#v}"
-          helm push "nixery-${CHART_VERSION}.tgz" "oci://ghcr.io/builderhub/nixery-helm/chart"
+          helm push "nixery-${CHART_VERSION}.tgz" "oci://ghcr.io/builderhub/nixery-helm/charts"
 

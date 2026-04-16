@@ -7,12 +7,45 @@ name: On PR
       - "charts/**"
       - "nixery/**"
       - ".github/workflows/on-pr.yaml"
+      - ".github/workflows/build-nixery.yaml"
 
 defaults:
   run:
     shell: bash
 
 jobs:
+  build-nixery-image:
+    runs-on: ubuntu-latest
+    env:
+      # Keep in sync with build-nixery.yaml workflow_dispatch default for nixery-ref
+      NIXERY_SRC_REF: 7eb6caf6c9de3d760351edaa9cb78debe4221dbd
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/checkout@v6
+        with:
+          repository: tazjin/nixery
+          ref: ${{ env.NIXERY_SRC_REF }}
+          path: nixery-src
+
+      - uses: DeterminateSystems/nix-installer-action@v22
+
+      - uses: DeterminateSystems/magic-nix-cache-action@v13
+
+      - name: Build nixery-image (no push)
+        env:
+          NIXPKGS_ARCHIVE: https://github.com/NixOS/nixpkgs/archive/nixpkgs-unstable.tar.gz
+        run: |
+          set -euo pipefail
+          export NIX_PATH="nixpkgs=${NIXPKGS_ARCHIVE}"
+          nix-build nixery/image.nix \
+            --option sandbox false \
+            --max-jobs 2
+          ls -lh result
+
   test-chart:
     runs-on: ${{ matrix.runs-on }}
     env:

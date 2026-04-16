@@ -15,10 +15,10 @@ name: Build Nixery (Nix)
         required: false
         default: "tazjin/nixery"
       nixery-ref:
-        description: Git ref (branch or tag) to checkout
+        description: "Git ref (branch, tag, or commit SHA) for upstream nixery"
         type: string
         required: false
-        default: "master"
+        default: "7eb6caf6c9de3d760351edaa9cb78debe4221dbd"
       image-repository:
         description: "Destination image without tag (empty = ghcr.io/<github.repository>/nixery, lowercase)"
         type: string
@@ -42,7 +42,7 @@ name: Build Nixery (Nix)
       nixery-ref:
         type: string
         required: false
-        default: "master"
+        default: "7eb6caf6c9de3d760351edaa9cb78debe4221dbd"
       image-repository:
         type: string
         required: false

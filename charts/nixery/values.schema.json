@@ -133,6 +133,7 @@
             "bucket": { "type": "string" },
             "endpoint": { "type": "string" },
             "region": { "type": "string" },
+            "usePathStyle": { "type": "boolean" },
             "existingSecret": { "type": "string" },
             "accessKeyKey": { "type": "string" },
             "secretKeyKey": { "type": "string" },

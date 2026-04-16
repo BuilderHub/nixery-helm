@@ -15,10 +15,10 @@ name: Build Nixery (Nix)
         required: false
         default: "tazjin/nixery"
       nixery-ref:
-        description: Git ref (branch or tag) to checkout
+        description: "Git ref (branch, tag, or commit SHA) for upstream nixery"
         type: string
         required: false
-        default: "master"
+        default: "7eb6caf6c9de3d760351edaa9cb78debe4221dbd"
       image-repository:
         description: "Destination image without tag (empty = ghcr.io/<github.repository>/nixery, lowercase)"
         type: string
@@ -42,7 +42,7 @@ name: Build Nixery (Nix)
       nixery-ref:
         type: string
         required: false
-        default: "master"
+        default: "7eb6caf6c9de3d760351edaa9cb78debe4221dbd"
       image-repository:
         type: string
         required: false
@@ -96,10 +96,12 @@ jobs:
           echo "registry_host=${REG_HOST}" >> "${GITHUB_OUTPUT}"
 
       - uses: actions/checkout@v6
+
+      - uses: actions/checkout@v6
         with:
           repository: ${{ inputs['nixery-repository'] }}
           ref: ${{ inputs['nixery-ref'] }}
-          path: nixery
+          path: nixery-src
 
       - uses: DeterminateSystems/nix-installer-action@v22
 
@@ -113,7 +115,7 @@ jobs:
           set -euo pipefail
           export NIX_PATH="nixpkgs=${NIXPKGS_ARCHIVE}"
           # dockerTools layer builds often hit sandbox restrictions on hosted runners
-          nix-build -E '(import ./nixery/default.nix { pkgs = import <nixpkgs> {}; }).nixery-image' \
+          nix-build nixery/image.nix \
             --option sandbox false \
             --max-jobs 2
           ls -lh result

@@ -101,6 +101,12 @@ spec:
             - name: AWS_REGION
               value: {{ .Values.storage.s3.region | quote }}
             {{- end }}
+            {{- $pathStyle := true -}}
+            {{- if hasKey .Values.storage.s3 "usePathStyle" -}}
+            {{- $pathStyle = .Values.storage.s3.usePathStyle -}}
+            {{- end }}
+            - name: S3_USE_PATH_STYLE
+              value: {{ $pathStyle | quote }}
             {{- $s3sec := "" }}
             {{- if .Values.storage.s3.existingSecret }}
             {{- $s3sec = .Values.storage.s3.existingSecret }}

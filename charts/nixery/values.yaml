@@ -81,6 +81,8 @@ storage:
     bucket: ""
     endpoint: ""
     region: ""
+    # Path-style S3 URLs (MinIO-style). false = virtual-hosted (typical AWS). Requires image built with nixery/patches.
+    usePathStyle: true
     existingSecret: ""
     accessKeyKey: "access-key-id"
     secretKeyKey: "secret-access-key"

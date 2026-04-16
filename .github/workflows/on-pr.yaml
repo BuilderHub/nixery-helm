@@ -5,6 +5,7 @@ name: On PR
   pull_request:
     paths:
       - "charts/**"
+      - "nixery/**"
       - ".github/workflows/on-pr.yaml"
 
 defaults:

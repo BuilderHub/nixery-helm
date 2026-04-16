@@ -72,6 +72,7 @@ These are the knobs people actually touch. See [`charts/nixery/values.yaml`](cha
 | `storage.s3.bucket` | Required for S3. |
 | `storage.s3.endpoint` | Non-AWS S3-compatible endpoint (optional). |
 | `storage.s3.region` | AWS region or equivalent (optional). |
+| `storage.s3.usePathStyle` | `S3_USE_PATH_STYLE`: `true` for path-style (default; MinIO-style), `false` for virtual-hosted (typical AWS). Only honored by images built from this repo’s Nix overlay (see `nixery/`). |
 | `storage.s3.existingSecret` | Secret holding access key / secret key. |
 | `storage.s3.accessKeyKey` / `secretKeyKey` | Keys inside that secret. |
 | `storage.s3.createSecret` | Chart creates a Secret from `accessKey` / `secretKey` (dev only). |

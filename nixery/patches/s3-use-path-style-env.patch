@@ -1,0 +1,29 @@
+diff --git a/storage/s3.go b/storage/s3.go
+index c2c0be1..537658d 100644
+--- a/storage/s3.go
++++ b/storage/s3.go
+@@ -11,6 +11,7 @@ import (
+ 	"log/slog"
+ 	"net/http"
+ 	"os"
++	"strconv"
+ 	"time"
+ 
+ 	"github.com/aws/aws-sdk-go-v2/aws"
+@@ -62,8 +63,15 @@ func NewS3Backend() (*S3Backend, error) {
+ 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+ 	}
+ 
++	usePathStyle := true
++	if v, ok := os.LookupEnv("S3_USE_PATH_STYLE"); ok {
++		if b, err := strconv.ParseBool(v); err == nil {
++			usePathStyle = b
++		}
++	}
++
+ 	client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+-		o.UsePathStyle = true
++		o.UsePathStyle = usePathStyle
+ 	})
+ 
+ 	linkExpires := os.Getenv("S3_LINK_EXPIRATION")

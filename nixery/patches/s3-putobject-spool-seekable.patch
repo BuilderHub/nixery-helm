@@ -1,0 +1,83 @@
+diff --git a/storage/s3.go b/storage/s3.go
+index 537658d..1df7415 100644
+--- a/storage/s3.go
++++ b/storage/s3.go
+@@ -96,40 +96,62 @@ func (b *S3Backend) Name() string {
+ }
+ 
+ func (b *S3Backend) Persist(ctx context.Context, key, contentType string, f Persister) (string, int64, error) {
+-	// Use a pipe to connect the persister function to the S3 uploader
++	// Spool to a temp file before PutObject. The AWS SDK may retry requests and
++	// needs a seekable body; io.Pipe is not seekable ("failed to rewind transport
++	// stream for retry, request stream is not seekable").
+ 	pr, pw := io.Pipe()
+ 	done := make(chan error, 1)
+ 
+ 	var hash string
+-	var size int64
++	var layerSize int64
+ 	var uploadErr error
+ 
+-	// Run the persister function in a goroutine to avoid deadlocks
+ 	go func() {
+-		hash, size, uploadErr = f(pw)
++		hash, layerSize, uploadErr = f(pw)
+ 		pw.Close()
+ 		done <- uploadErr
+ 	}()
+ 
+-	_, err := b.client.PutObject(ctx, &s3.PutObjectInput{
+-		Bucket:      aws.String(b.bucket),
+-		Key:         aws.String(key),
+-		Body:        pr,
+-		ContentType: aws.String(contentType),
+-	})
+-
++	tmp, err := os.CreateTemp("", "nixery-s3-*")
+ 	if err != nil {
+-		slog.Error("failed to write to S3", "err", err, "key", key)
+-		return "", 0, err
++		return "", 0, fmt.Errorf("create temp file for S3 upload: %w", err)
+ 	}
++	tmpName := tmp.Name()
++	defer func() {
++		tmp.Close()
++		os.Remove(tmpName)
++	}()
+ 
+-	// Wait for the persister to finish
++	if _, err := io.Copy(tmp, pr); err != nil {
++		return "", 0, fmt.Errorf("spool layer to temp file: %w", err)
++	}
+ 	if err := <-done; err != nil {
+-		slog.Error("failed to complete S3 upload", "err", err, "key", key)
++		slog.Error("failed to build layer for S3", "err", err, "key", key)
++		return "", 0, err
++	}
++
++	if _, err := tmp.Seek(0, 0); err != nil {
++		return "", 0, fmt.Errorf("rewind temp file for S3 upload: %w", err)
++	}
++	st, err := tmp.Stat()
++	if err != nil {
++		return "", 0, fmt.Errorf("stat temp file for S3 upload: %w", err)
++	}
++
++	_, err = b.client.PutObject(ctx, &s3.PutObjectInput{
++		Bucket:        aws.String(b.bucket),
++		Key:           aws.String(key),
++		Body:          tmp,
++		ContentLength: aws.Int64(st.Size()),
++		ContentType:   aws.String(contentType),
++	})
++
++	if err != nil {
++		slog.Error("failed to write to S3", "err", err, "key", key)
+ 		return "", 0, err
+ 	}
+ 
+-	return hash, size, nil
++	return hash, layerSize, nil
+ }
+ 
+ func (b *S3Backend) Fetch(ctx context.Context, key string) (io.ReadCloser, error) {

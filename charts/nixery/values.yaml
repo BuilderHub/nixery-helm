@@ -3,7 +3,7 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/builderhub/nixery-helm/nixery
-  tag: fb670e1ade5b69c6efe4fe3bf08e8eaaf7da9f87
+  tag: 61c016e8423640cc15372e46347b38f0ed3a0eb6
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

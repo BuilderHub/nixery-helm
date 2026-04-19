@@ -23,6 +23,32 @@ index fd96008..36e32cc 100644
  			}, nil
  		}
  	}
+@@ -468,7 +473,9 @@ func BuildImage(ctx context.Context, s *State, image *Image) (*BuildResult, erro
+ 	}
+ 
+ 	if key != "" {
+-		go cacheManifest(ctx, s, key, m)
++		// Finish caching before returning so the next manifest request (e.g. GET
++		// after HEAD) observes the manifest cache and does not rebuild.
++		cacheManifest(ctx, s, key, m)
+ 	}
+ 
+ 	result := BuildResult{
+diff --git a/builder/cache.go b/builder/cache.go
+index bfee668..cfeb1f5 100644
+--- a/builder/cache.go
++++ b/builder/cache.go
+@@ -128,7 +128,9 @@ func manifestFromCache(ctx context.Context, s *State, key string) (json.RawMessa
+ 
+ // Add a manifest to the bucket & local caches
+ func cacheManifest(ctx context.Context, s *State, key string, m json.RawMessage) {
+-	go s.Cache.localCacheManifest(key, m)
++	// Write the local cache synchronously so a follow-up request in this process
++	// hits manifestFromCache before BuildImage runs again.
++	s.Cache.localCacheManifest(key, m)
+ 
+ 	path := "manifests/" + key
+ 	_, size, err := s.Storage.Persist(ctx, path, manifest.ManifestType, func(w io.Writer) (string, int64, error) {
 diff --git a/cmd/server/main.go b/cmd/server/main.go
 index bf47a34..f89d595 100644
 --- a/cmd/server/main.go

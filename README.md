@@ -94,6 +94,20 @@ These are the knobs people actually touch. See [`charts/nixery/values.yaml`](cha
 | `extraVolumes` / `extraVolumeMounts` | Attach arbitrary volumes. |
 | `extraEnvFrom` | Extra `envFrom` (e.g. ConfigMaps). |
 
+## Included metrics (overlay image)
+
+When you use an image produced from this repo’s Nix overlay ([`nixery/image.nix`](nixery/image.nix), including [`nixery/patches/prometheus-metrics.patch`](nixery/patches/prometheus-metrics.patch)) and [`metrics.enabled`](charts/nixery/values.yaml) is `true`, the server exposes Prometheus metrics at `metrics.path` (default `/metrics`; see the values table). Upstream stock Nixery images do not include this endpoint.
+
+| Metric | Type | Meaning |
+|--------|------|---------|
+| `nixery_builds_attempted_total` | Counter | Manifest builds that **missed** the manifest cache (a real build attempt). Cache hits are not counted here. |
+| `nixery_builds_succeeded_total` | Counter | Non-cache builds that finished without an infrastructure error and without a Nix-reported image error. |
+| `nixery_builds_failed_total` | Counter | Non-cache builds that failed (e.g. Nix invocation error, missing packages, or other errors surfaced as `BuildResult.Error`). |
+| `nixery_build_duration_seconds` | Histogram | Wall-clock time spent in `BuildImage` for **non-cache** attempts only. Buckets are sized for long Nix runs (seconds to about two hours). |
+| `nixery_manifests_served_total` | Counter | Successful HTTP responses that return a manifest body (HTTP 200), **including** manifest cache hits. |
+| `nixery_manifest_response_bytes_total` | Counter | Bytes written to clients for successful manifest responses. |
+| `nixery_blob_response_bytes_total` | Counter | Bytes written to clients for blob responses. With S3/GCS backends that **redirect** to object storage, this may stay near zero because the client follows `Location` and bytes are not streamed through Nixery. |
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

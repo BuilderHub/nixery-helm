@@ -1,18 +1,23 @@
 # Values for CI (Kind), `helm lint -f`, and `helm template` smoke tests.
 # Keep repository:tag in sync with NIXERY_IMAGE in .github/workflows/on-pr.yaml (Kind loads that image locally).
+# The image must be built from this repo (nixery overlay with metrics patch) so /metrics e2e checks pass.
 replicaCount: 1
 
 fullnameOverride: nixery-ci
 
 image:
   repository: ghcr.io/builderhub/nixery-helm/nixery
-  tag: 1c4f75544b1452c4b9ee5c7e3dd2eea8f0f2a2d6
+  tag: dc82d08a58ea237edf7a43274642fc3b6c6ab11a
   # Use local image after `kind load` in CI; avoids re-pulling private GHCR inside the cluster.
   pullPolicy: IfNotPresent
 
 service:
   type: ClusterIP
   port: 8080
+
+metrics:
+  enabled: true
+  path: /metrics
 
 nixery:
   channel: "nixpkgs-unstable"

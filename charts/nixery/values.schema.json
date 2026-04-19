@@ -45,6 +45,13 @@
         "annotations": { "type": "object" }
       }
     },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "path": { "type": "string" }
+      }
+    },
     "ingress": {
       "type": "object",
       "properties": {

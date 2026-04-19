@@ -144,7 +144,10 @@ jobs:
               exit 1
             }
           done
-          awk '/^nixery_manifests_served_total / { if ($2 > 0) ok=1 } END { if (!ok) { print "nixery_manifests_served_total should be > 0 after pulls" >&2; exit 1 } }' <<< "${METRICS_BODY}"
+          if ! printf '%s\n' "${METRICS_BODY}" | grep -qE '^nixery_manifests_served_total [1-9]'; then
+            echo "nixery_manifests_served_total should be > 0 after pulls" >&2
+            exit 1
+          fi
 
       - name: Debug cluster
         if: always()

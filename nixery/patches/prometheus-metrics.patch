@@ -100,7 +100,7 @@ index bf47a34..f89d595 100644
  	// Some error types have special handling, which is applied
  	// here.
  	if buildResult.Error == "not_found" {
-@@ -196,16 +232,30 @@ func (h *registryHandler) serveManifestTag(w http.ResponseWriter, r *http.Reques
+@@ -196,16 +232,33 @@ func (h *registryHandler) serveManifestTag(w http.ResponseWriter, r *http.Reques
  		return
  	}
  
@@ -113,8 +113,11 @@ index bf47a34..f89d595 100644
 +		return
 +	}
 +
-+	metrics.IncManifestsServed()
-+	metrics.AddManifestBytes(cw.n)
++	// OCI clients often send HEAD then GET for the same manifest; count served work once (GET body).
++	if r.Method == http.MethodGet {
++		metrics.IncManifestsServed()
++		metrics.AddManifestBytes(cw.n)
++	}
  }
  
  // serveBlob serves a blob from storage by digest

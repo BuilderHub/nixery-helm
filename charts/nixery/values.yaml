@@ -29,6 +29,11 @@ service:
   port: 8080
   annotations: {}
 
+# Prometheus-style metrics (NIXERY_METRICS_*). Requires an image built with the metrics patch.
+metrics:
+  enabled: true
+  path: /metrics
+
 ingress:
   enabled: false
   className: ""

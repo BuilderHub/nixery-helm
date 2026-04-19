@@ -8,6 +8,7 @@ let
     patches = [
       ./patches/s3-use-path-style-env.patch
       ./patches/s3-putobject-spool-seekable.patch
+      ./patches/prometheus-metrics.patch
     ];
   };
 in

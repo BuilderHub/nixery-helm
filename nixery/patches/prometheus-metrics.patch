@@ -1,0 +1,490 @@
+diff --git a/builder/builder.go b/builder/builder.go
+index fd96008..36e32cc 100644
+--- a/builder/builder.go
++++ b/builder/builder.go
+@@ -84,6 +84,10 @@ type BuildResult struct {
+ 	Error    string          `json:"error"`
+ 	Pkgs     []string        `json:"pkgs"`
+ 	Manifest json.RawMessage `json:"manifest"`
++
++	// FromCache is true when the manifest was served from the in-memory/cache
++	// without running a new Nix build. It is not part of the JSON protocol.
++	FromCache bool `json:"-"`
+ }
+ 
+ // ImageFromName parses an image name into the corresponding structure which can
+@@ -423,7 +427,8 @@ func BuildImage(ctx context.Context, s *State, image *Image) (*BuildResult, erro
+ 	if key != "" {
+ 		if m, c := manifestFromCache(ctx, s, key); c {
+ 			return &BuildResult{
+-				Manifest: m,
++				Manifest:  m,
++				FromCache: true,
+ 			}, nil
+ 		}
+ 	}
+diff --git a/cmd/server/main.go b/cmd/server/main.go
+index bf47a34..f89d595 100644
+--- a/cmd/server/main.go
++++ b/cmd/server/main.go
+@@ -24,12 +24,14 @@ import (
+ 	"os"
+ 	"regexp"
+ 	"text/template"
++	"time"
+ 
+ 	"github.com/google/nixery/assets"
+ 	"github.com/google/nixery/builder"
+ 	"github.com/google/nixery/config"
+ 	"github.com/google/nixery/layers"
+ 	mf "github.com/google/nixery/manifest"
++	"github.com/google/nixery/metrics"
+ 	"github.com/google/nixery/storage"
+ 	"github.com/im7mortal/kmutex"
+ )
+@@ -119,6 +121,25 @@ type registryErrors struct {
+ 	Errors []registryError `json:"errors"`
+ }
+ 
++// countingResponseWriter counts bytes successfully written to the wrapped
++// response. It optionally forwards [http.Flusher] when supported.
++type countingResponseWriter struct {
++	http.ResponseWriter
++	n int64
++}
++
++func (c *countingResponseWriter) Write(p []byte) (int, error) {
++	n, err := c.ResponseWriter.Write(p)
++	c.n += int64(n)
++	return n, err
++}
++
++func (c *countingResponseWriter) Flush() {
++	if f, ok := c.ResponseWriter.(http.Flusher); ok {
++		f.Flush()
++	}
++}
++
+ func writeError(w http.ResponseWriter, status int, code, message string) {
+ 	err := registryErrors{
+ 		Errors: []registryError{
+@@ -142,9 +163,14 @@ func (h *registryHandler) serveManifestTag(w http.ResponseWriter, r *http.Reques
+ 	slog.Info("requesting image manifest", "image", name, "tag", tag)
+ 
+ 	image := builder.ImageFromName(name, tag)
++	start := time.Now()
+ 	buildResult, err := builder.BuildImage(r.Context(), h.state, &image)
++	elapsed := time.Since(start).Seconds()
+ 
+ 	if err != nil {
++		metrics.IncBuildAttempted()
++		metrics.ObserveBuildDuration(elapsed)
++		metrics.IncBuildFailed()
+ 		writeError(w, 500, "UNKNOWN", "image build failure")
+ 
+ 		slog.Error("failed to build image manifest", "err", err, "image", name, "tag", tag)
+@@ -152,6 +178,16 @@ func (h *registryHandler) serveManifestTag(w http.ResponseWriter, r *http.Reques
+ 		return
+ 	}
+ 
++	if !buildResult.FromCache {
++		metrics.IncBuildAttempted()
++		metrics.ObserveBuildDuration(elapsed)
++		if buildResult.Error != "" {
++			metrics.IncBuildFailed()
++		} else {
++			metrics.IncBuildSucceeded()
++		}
++	}
++
+ 	// Some error types have special handling, which is applied
+ 	// here.
+ 	if buildResult.Error == "not_found" {
+@@ -196,16 +232,30 @@ func (h *registryHandler) serveManifestTag(w http.ResponseWriter, r *http.Reques
+ 		return
+ 	}
+ 
+-	w.Write(manifest)
++	cw := &countingResponseWriter{ResponseWriter: w}
++	_, werr := cw.Write(manifest)
++	if werr != nil {
++		slog.Error("failed to write manifest response", "err", werr, "image", name, "tag", tag)
++
++		return
++	}
++
++	metrics.IncManifestsServed()
++	metrics.AddManifestBytes(cw.n)
+ }
+ 
+ // serveBlob serves a blob from storage by digest
+ func (h *registryHandler) serveBlob(w http.ResponseWriter, r *http.Request, blobType, digest string) {
+ 	storage := h.state.Storage
+-	err := storage.Serve(digest, r, w)
++	cw := &countingResponseWriter{ResponseWriter: w}
++	err := storage.Serve(digest, r, cw)
+ 	if err != nil {
+ 		slog.Error("failed to serve blob from storage backend", "err", err, "type", blobType, "digest", digest, "backend", storage.Name())
++
++		return
+ 	}
++
++	metrics.AddBlobBytes(cw.n)
+ }
+ 
+ // ServeHTTP dispatches HTTP requests to the matching handlers.
+@@ -292,6 +342,10 @@ func main() {
+ 
+ 	slog.Info("starting Nixery", "version", version, "port", cfg.Port)
+ 
++	if mh := metrics.Configure(cfg); mh != nil {
++		http.Handle(cfg.MetricsPath, mh)
++	}
++
+ 	// All /v2/ requests belong to the registry handler.
+ 	http.Handle("/v2/", &registryHandler{
+ 		state: &state,
+diff --git a/config/config.go b/config/config.go
+index 85214c0..b2c7840 100644
+--- a/config/config.go
++++ b/config/config.go
+@@ -9,6 +9,8 @@ package config
+ import (
+ 	"log/slog"
+ 	"os"
++	"strconv"
++	"strings"
+ )
+ 
+ func getConfig(key, desc, def string) string {
+@@ -40,6 +42,9 @@ type Config struct {
+ 
+ 	PopUrl  string  // URL to the Nix package popularity count
+ 	Backend Backend // Storage backend to use for Nixery
++
++	MetricsEnabled bool   // Expose Prometheus metrics when true (NIXERY_METRICS_ENABLED)
++	MetricsPath    string // HTTP path for metrics (NIXERY_METRICS_PATH, default /metrics)
+ }
+ 
+ func FromEnv() (Config, error) {
+@@ -61,11 +66,25 @@ func FromEnv() (Config, error) {
+ 		os.Exit(1)
+ 	}
+ 
++	metricsEnabled := false
++	if v := strings.TrimSpace(os.Getenv("NIXERY_METRICS_ENABLED")); v != "" {
++		if m, err := strconv.ParseBool(v); err == nil {
++			metricsEnabled = m
++		}
++	}
++	metricsPath := strings.TrimSpace(os.Getenv("NIXERY_METRICS_PATH"))
++	if metricsPath == "" {
++		metricsPath = "/metrics"
++	}
++
+ 	return Config{
+ 		Port:    getConfig("PORT", "HTTP port", ""),
+ 		Pkgs:    pkgs,
+ 		Timeout: getConfig("NIX_TIMEOUT", "Nix builder timeout", "60"),
+ 		PopUrl:  os.Getenv("NIX_POPULARITY_URL"),
+ 		Backend: b,
++
++		MetricsEnabled: metricsEnabled,
++		MetricsPath:    metricsPath,
+ 	}, nil
+ }
+diff --git a/default.nix b/default.nix
+index a1511a4..9c81394 100644
+--- a/default.nix
++++ b/default.nix
+@@ -44,7 +44,7 @@ depot.nix.readTree.drvTargets rec {
+     doCheck = true;
+ 
+     # Needs to be updated after every modification of go.mod/go.sum
+-    vendorHash = "sha256-ctAYtsnahB+Nk3gcHM3sYKhRkFTaILrggHo81MJHpx0=";
++    vendorHash = "sha256-RAmUe1/tyMY2bfMv70QS/gTTvD/151SlTfkOE+nZq/w=";
+ 
+     ldflags = [
+       "-s"
+diff --git a/go.mod b/go.mod
+index d167363..d701d61 100644
+--- a/go.mod
++++ b/go.mod
+@@ -11,6 +11,7 @@ require (
+ 	github.com/google/go-cmp v0.7.0
+ 	github.com/im7mortal/kmutex v1.0.2
+ 	github.com/pkg/xattr v0.4.12
++	github.com/prometheus/client_golang v1.22.0
+ 	golang.org/x/oauth2 v0.30.0
+ 	gonum.org/v1/gonum v0.16.0
+ )
+@@ -34,19 +35,25 @@ require (
+ 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.16 // indirect
+ 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.8 // indirect
+ 	github.com/aws/smithy-go v1.24.2 // indirect
++	github.com/beorn7/perks v1.0.1 // indirect
++	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+ 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
+ 	github.com/golang/protobuf v1.5.2 // indirect
+ 	github.com/google/uuid v1.1.2 // indirect
+ 	github.com/googleapis/gax-go/v2 v2.3.0 // indirect
+ 	github.com/googleapis/go-type-adapters v1.0.0 // indirect
++	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
++	github.com/prometheus/client_model v0.6.1 // indirect
++	github.com/prometheus/common v0.62.0 // indirect
++	github.com/prometheus/procfs v0.15.1 // indirect
+ 	go.opencensus.io v0.23.0 // indirect
+-	golang.org/x/net v0.0.0-20220325170049-de3da57026de // indirect
+-	golang.org/x/sys v0.0.0-20220408201424-a24fb2fb8a0f // indirect
++	golang.org/x/net v0.33.0 // indirect
++	golang.org/x/sys v0.30.0 // indirect
+ 	golang.org/x/text v0.23.0 // indirect
+ 	golang.org/x/xerrors v0.0.0-20220411194840-2f41105eb62f // indirect
+ 	google.golang.org/api v0.74.0 // indirect
+ 	google.golang.org/appengine v1.6.7 // indirect
+ 	google.golang.org/genproto v0.0.0-20220518221133-4f43b3371335 // indirect
+ 	google.golang.org/grpc v1.46.0 // indirect
+-	google.golang.org/protobuf v1.28.0 // indirect
++	google.golang.org/protobuf v1.36.5 // indirect
+ )
+diff --git a/go.sum b/go.sum
+index 4288c22..9437af3 100644
+--- a/go.sum
++++ b/go.sum
+@@ -97,9 +97,13 @@ github.com/aws/aws-sdk-go-v2/service/sts v1.41.8 h1:XQTQTF75vnug2TXS8m7CVJfC2nni
+ github.com/aws/aws-sdk-go-v2/service/sts v1.41.8/go.mod h1:Xgx+PR1NUOjNmQY+tRMnouRp83JRM8pRMw/vCaVhPkI=
+ github.com/aws/smithy-go v1.24.2 h1:FzA3bu/nt/vDvmnkg+R8Xl46gmzEDam6mZ1hzmwXFng=
+ github.com/aws/smithy-go v1.24.2/go.mod h1:YE2RhdIuDbA5E5bTdciG9KrW3+TiEONeUWCqxX9i1Fc=
++github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
++github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
+ github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
+ github.com/cespare/xxhash v1.1.0/go.mod h1:XrSqR1VqqWfGrhpAt58auRo0WTKS1nRRg3ghfAqPWnc=
+ github.com/cespare/xxhash/v2 v2.1.1/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
++github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
++github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
+ github.com/chzyer/logex v1.1.10/go.mod h1:+Ywpsq7O8HXn0nuIou7OrIPyXbp3wmkHB+jjWRnGsAI=
+ github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e/go.mod h1:nSuG5e5PlCu98SY8svDHJxuZscDgtXS6KTTbou5AhLI=
+ github.com/chzyer/test v0.0.0-20180213035817-a1ea475d72b1/go.mod h1:Q3SI9o4m/ZMnBNeIyt5eFwwo7qiLfzFZmjNmxjkiQlU=
+@@ -114,6 +118,8 @@ github.com/cncf/xds/go v0.0.0-20210922020428-25de7278fc84/go.mod h1:eXthEFrGJvWH
+ github.com/cncf/xds/go v0.0.0-20211001041855-01bcc9b48dfe/go.mod h1:eXthEFrGJvWHgFFCl3hGmgk+/aYT6PnTQLykKQRLhEs=
+ github.com/cncf/xds/go v0.0.0-20211011173535-cb28da3451f1/go.mod h1:eXthEFrGJvWHgFFCl3hGmgk+/aYT6PnTQLykKQRLhEs=
+ github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
++github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
++github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+ github.com/envoyproxy/go-control-plane v0.9.0/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
+ github.com/envoyproxy/go-control-plane v0.9.1-0.20191026205805-5f8ba28d4473/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
+ github.com/envoyproxy/go-control-plane v0.9.4/go.mod h1:6rpuAdCZL397s3pYoYcLgu1mIlRU8Am5FuJP05cCM98=
+@@ -221,13 +227,28 @@ github.com/im7mortal/kmutex v1.0.2/go.mod h1:f71c/Ugk/+58OHRAgvgzPP3QEiWGUjK13fd
+ github.com/jstemmer/go-junit-report v0.0.0-20190106144839-af01ea7f8024/go.mod h1:6v2b51hI/fHJwM22ozAgKL4VKDeJcHhJFhtBdhmNjmU=
+ github.com/jstemmer/go-junit-report v0.9.1/go.mod h1:Brl9GWCQeLvo8nXZwPNNblvFj/XSXhF0NWZEnDohbsk=
+ github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
++github.com/klauspost/compress v1.18.0 h1:c/Cqfb0r+Yi+JtIEq73FWXVkRonBlf0CRNYc8Zttxdo=
++github.com/klauspost/compress v1.18.0/go.mod h1:2Pp+KzxcywXVXMr50+X0Q/Lsb43OQHYWRCY2AiWywWQ=
+ github.com/kr/pretty v0.1.0/go.mod h1:dAy3ld7l9f0ibDNOQOHHMYYIIbhfbHSm3C4ZsoJORNo=
+ github.com/kr/pty v1.1.1/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=
+ github.com/kr/text v0.1.0/go.mod h1:4Jbv+DJW3UT/LiOwJeYQe1efqtUx/iVham/4vfdArNI=
++github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
++github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
++github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=
++github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
+ github.com/pkg/xattr v0.4.12 h1:rRTkSyFNTRElv6pkA3zpjHpQ90p/OdHQC1GmGh1aTjM=
+ github.com/pkg/xattr v0.4.12/go.mod h1:di8WF84zAKk8jzR1UBTEWh9AUlIZZ7M/JNt8e9B6ktU=
++github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
+ github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
++github.com/prometheus/client_golang v1.22.0 h1:rb93p9lokFEsctTys46VnV1kLCDpVZ0a/Y92Vm0Zc6Q=
++github.com/prometheus/client_golang v1.22.0/go.mod h1:R7ljNsLXhuQXYZYtw6GAE9AZg8Y7vEW5scdCXrWRXC0=
+ github.com/prometheus/client_model v0.0.0-20190812154241-14fe0d1b01d4/go.mod h1:xMI15A0UPsDsEKsMN9yxemIoYk6Tm2C1GtYGdfGttqA=
++github.com/prometheus/client_model v0.6.1 h1:ZKSh/rekM+n3CeS952MLRAdFwIKqeY8b62p8ais2e9E=
++github.com/prometheus/client_model v0.6.1/go.mod h1:OrxVMOVHjw3lKMa8+x6HeMGkHMQyHDk9E3jmP2AmGiY=
++github.com/prometheus/common v0.62.0 h1:xasJaQlnWAeyHdUBeGjXmutelfJHWMRr+Fg4QszZ2Io=
++github.com/prometheus/common v0.62.0/go.mod h1:vyBcEuLSvWos9B1+CyL7JZ2up+uFzXhkqml0W5zIY1I=
++github.com/prometheus/procfs v0.15.1 h1:YagwOFzUgYfKKHX6Dr+sHT7km/hxC76UB0learggepc=
++github.com/prometheus/procfs v0.15.1/go.mod h1:fB45yRUv8NstnjriLhBQLuOUt+WW4BsoGhij/e3PBqk=
+ github.com/rogpeppe/fastuuid v1.2.0/go.mod h1:jVj6XXZzXRy/MSR5jhDC/2q6DgLz+nrA6LYCDYWNEvQ=
+ github.com/rogpeppe/go-internal v1.3.0/go.mod h1:M8bDsm7K2OlrFYOpmOWEs/qY81heoFRclV5y23lUDJ4=
+ github.com/spaolacci/murmur3 v0.0.0-20180118202830-f09979ecbc72/go.mod h1:JwIasOWyU6f++ZhiEuf87xNszmSA2myDM2Kzu9HwQUA=
+@@ -236,6 +257,8 @@ github.com/stretchr/testify v1.4.0/go.mod h1:j7eGeouHqKxXV5pUuKE4zz7dFj8WfuZ+81P
+ github.com/stretchr/testify v1.5.1/go.mod h1:5W2xD1RspED5o8YsWQXVCued0rvSQ+mT+I5cxcmMvtA=
+ github.com/stretchr/testify v1.6.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
+ github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
++github.com/stretchr/testify v1.10.0 h1:Xv5erBjTwe/5IxqUQTdXv5kgmIvbHo3QQyRwhJsOfJA=
++github.com/stretchr/testify v1.10.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
+ github.com/yuin/goldmark v1.1.25/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
+ github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
+ github.com/yuin/goldmark v1.1.32/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
+@@ -327,8 +350,9 @@ golang.org/x/net v0.0.0-20210405180319-a5a99cb37ef4/go.mod h1:p54w0d4576C0XHj96b
+ golang.org/x/net v0.0.0-20210503060351-7fd8e65b6420/go.mod h1:9nx3DQGgdP8bBQD5qxJ1jj9UTztislL4KSBs9R2vV5Y=
+ golang.org/x/net v0.0.0-20220127200216-cd36cc0744dd/go.mod h1:CfG3xpIq0wQ8r1q4Su4UZFWDARRcnwPjda9FqA0JpMk=
+ golang.org/x/net v0.0.0-20220225172249-27dd8689420f/go.mod h1:CfG3xpIq0wQ8r1q4Su4UZFWDARRcnwPjda9FqA0JpMk=
+-golang.org/x/net v0.0.0-20220325170049-de3da57026de h1:pZB1TWnKi+o4bENlbzAgLrEbY4RMYmUIRobMcSmfeYc=
+ golang.org/x/net v0.0.0-20220325170049-de3da57026de/go.mod h1:CfG3xpIq0wQ8r1q4Su4UZFWDARRcnwPjda9FqA0JpMk=
++golang.org/x/net v0.33.0 h1:74SYHlV8BIgHIFC/LrYkOGIwL19eTYXQ5wc6TBuO36I=
++golang.org/x/net v0.33.0/go.mod h1:HXLR5J+9DxmrqMwG9qjGCxZ+zKXxBru04zlTvWlWuN4=
+ golang.org/x/oauth2 v0.0.0-20180821212333-d2e6202438be/go.mod h1:N/0e6XlmueqKjAGxoOufVs8QHGRruUQn6yWY3a++T0U=
+ golang.org/x/oauth2 v0.0.0-20190226205417-e64efc72b421/go.mod h1:gOpvHmFTYa4IltrdGE7lF6nIHvwfUNPOp7c8zoXwtLw=
+ golang.org/x/oauth2 v0.0.0-20190604053449-0f29369cfe45/go.mod h1:gOpvHmFTYa4IltrdGE7lF6nIHvwfUNPOp7c8zoXwtLw=
+@@ -414,8 +438,9 @@ golang.org/x/sys v0.0.0-20220128215802-99c3d69c2c27/go.mod h1:oPkhp1MJrh7nUepCBc
+ golang.org/x/sys v0.0.0-20220209214540-3681064d5158/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+ golang.org/x/sys v0.0.0-20220227234510-4e6760a101f9/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+ golang.org/x/sys v0.0.0-20220328115105-d36c6a25d886/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+-golang.org/x/sys v0.0.0-20220408201424-a24fb2fb8a0f h1:8w7RhxzTVgUzw/AH/9mUV5q0vMgy40SQRursCcfmkCw=
+ golang.org/x/sys v0.0.0-20220408201424-a24fb2fb8a0f/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
++golang.org/x/sys v0.30.0 h1:QjkSwP/36a20jFYWkSue1YwXzLmsV5Gfq7Eiy72C1uc=
++golang.org/x/sys v0.30.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=
+ golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1/go.mod h1:bj7SfCRtBDWHUb9snDiAeCFNEtKQo2Wmx5Cou7ajbmo=
+ golang.org/x/term v0.0.0-20210927222741-03fcf44c2211/go.mod h1:jbD1KX2456YbFQfuXm/mYQcufACuNUgVhRMnK/tPxf8=
+ golang.org/x/text v0.0.0-20170915032832-14c0d48ead0c/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
+@@ -651,14 +676,17 @@ google.golang.org/protobuf v1.25.0/go.mod h1:9JNX74DMeImyA3h4bdi1ymwjUzf21/xIlba
+ google.golang.org/protobuf v1.26.0-rc.1/go.mod h1:jlhhOSvTdKEhbULTjvd4ARK9grFBp09yW+WbY/TyQbw=
+ google.golang.org/protobuf v1.26.0/go.mod h1:9q0QmTI4eRPtz6boOQmLYwt+qCgq0jsYwAQnmE0givc=
+ google.golang.org/protobuf v1.27.1/go.mod h1:9q0QmTI4eRPtz6boOQmLYwt+qCgq0jsYwAQnmE0givc=
+-google.golang.org/protobuf v1.28.0 h1:w43yiav+6bVFTBQFZX0r7ipe9JQ1QsbMgHwbBziscLw=
+ google.golang.org/protobuf v1.28.0/go.mod h1:HV8QOd/L58Z+nl8r43ehVNZIU/HEI6OcFqwMG9pJV4I=
++google.golang.org/protobuf v1.36.5 h1:tPhr+woSbjfYvY6/GPufUoYizxw1cF/yFoxJ2fmpwlM=
++google.golang.org/protobuf v1.36.5/go.mod h1:9fA7Ob0pmnwhb644+1+CVWFRbNajQ6iRojtC/QF5bRE=
+ gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
+ gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
+ gopkg.in/errgo.v2 v2.1.0/go.mod h1:hNsd1EY+bozCKY1Ytp96fpM3vjJbqLJn88ws8XvfDNI=
+ gopkg.in/yaml.v2 v2.2.2/go.mod h1:hI93XBmqTisBFMUTm0b8Fm+jr3Dg1NNxqwp+5A1VGuI=
+ gopkg.in/yaml.v2 v2.2.3/go.mod h1:hI93XBmqTisBFMUTm0b8Fm+jr3Dg1NNxqwp+5A1VGuI=
+ gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
++gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
++gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
+ honnef.co/go/tools v0.0.0-20190102054323-c2f93a96b099/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=
+ honnef.co/go/tools v0.0.0-20190106161140-3f1c8253044a/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=
+ honnef.co/go/tools v0.0.0-20190418001031-e561f6794a2a/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=
+diff --git a/metrics/metrics.go b/metrics/metrics.go
+new file mode 100644
+index 0000000..9a672e1
+--- /dev/null
++++ b/metrics/metrics.go
+@@ -0,0 +1,129 @@
++// Copyright BuilderHub
++// SPDX-License-Identifier: Apache-2.0
++
++// Package metrics registers optional Prometheus collectors for Nixery.
++package metrics
++
++import (
++	"net/http"
++
++	"github.com/google/nixery/config"
++	"github.com/prometheus/client_golang/prometheus"
++	"github.com/prometheus/client_golang/prometheus/promhttp"
++)
++
++var (
++	active bool
++
++	buildsAttempted prometheus.Counter
++	buildsSucceeded prometheus.Counter
++	buildsFailed    prometheus.Counter
++	buildDuration   prometheus.Histogram
++	manifestsServed prometheus.Counter
++	manifestBytes   prometheus.Counter
++	blobBytes       prometheus.Counter
++)
++
++// Configure registers Prometheus collectors when cfg.MetricsEnabled is true and
++// returns a handler for that registry. If metrics are disabled, it returns nil.
++func Configure(cfg config.Config) http.Handler {
++	if !cfg.MetricsEnabled {
++		active = false
++		return nil
++	}
++
++	reg := prometheus.NewRegistry()
++
++	buildsAttempted = prometheus.NewCounter(prometheus.CounterOpts{
++		Name: "nixery_builds_attempted_total",
++		Help: "Manifest build attempts that missed the manifest cache (excludes cache hits).",
++	})
++	buildsSucceeded = prometheus.NewCounter(prometheus.CounterOpts{
++		Name: "nixery_builds_succeeded_total",
++		Help: "Manifest builds that completed without handler or Nix-level errors (non-cache only).",
++	})
++	buildsFailed = prometheus.NewCounter(prometheus.CounterOpts{
++		Name: "nixery_builds_failed_total",
++		Help: "Manifest builds that failed with an error or Nix-reported image error (non-cache only).",
++	})
++	buildDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
++		Name:    "nixery_build_duration_seconds",
++		Help:    "Wall time spent in BuildImage for non-cache attempts.",
++		Buckets: []float64{1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600, 7200},
++	})
++	manifestsServed = prometheus.NewCounter(prometheus.CounterOpts{
++		Name: "nixery_manifests_served_total",
++		Help: "HTTP 200 responses with a manifest body (includes cache hits).",
++	})
++	manifestBytes = prometheus.NewCounter(prometheus.CounterOpts{
++		Name: "nixery_manifest_response_bytes_total",
++		Help: "Bytes written to clients in successful manifest responses.",
++	})
++	blobBytes = prometheus.NewCounter(prometheus.CounterOpts{
++		Name: "nixery_blob_response_bytes_total",
++		Help: "Bytes written to clients in successful blob responses.",
++	})
++
++	reg.MustRegister(
++		buildsAttempted,
++		buildsSucceeded,
++		buildsFailed,
++		buildDuration,
++		manifestsServed,
++		manifestBytes,
++		blobBytes,
++	)
++
++	active = true
++
++	return promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
++}
++
++func IncBuildAttempted() {
++	if !active {
++		return
++	}
++	buildsAttempted.Inc()
++}
++
++func ObserveBuildDuration(seconds float64) {
++	if !active {
++		return
++	}
++	buildDuration.Observe(seconds)
++}
++
++func IncBuildSucceeded() {
++	if !active {
++		return
++	}
++	buildsSucceeded.Inc()
++}
++
++func IncBuildFailed() {
++	if !active {
++		return
++	}
++	buildsFailed.Inc()
++}
++
++func IncManifestsServed() {
++	if !active {
++		return
++	}
++	manifestsServed.Inc()
++}
++
++func AddManifestBytes(n int64) {
++	if !active || n <= 0 {
++		return
++	}
++	manifestBytes.Add(float64(n))
++}
++
++func AddBlobBytes(n int64) {
++	if !active || n <= 0 {
++		return
++	}
++	blobBytes.Add(float64(n))
++}

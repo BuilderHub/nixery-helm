@@ -2,6 +2,9 @@
 {{- include "nixery.validatePkgSource" . }}
 {{- include "nixery.validateStorage" . }}
 {{- include "nixery.validateFilesystemVolumes" . }}
+{{- $metrics := .Values.metrics | default dict }}
+{{- $metricsEnabled := $metrics.enabled | default true }}
+{{- $metricsPath := $metrics.path | default "/metrics" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -65,6 +68,10 @@ spec:
           env:
             - name: PORT
               value: {{ .Values.service.port | quote }}
+            - name: NIXERY_METRICS_ENABLED
+              value: {{ $metricsEnabled | quote }}
+            - name: NIXERY_METRICS_PATH
+              value: {{ $metricsPath | quote }}
             - name: NIXERY_STORAGE_BACKEND
               value: {{ .Values.storage.backend | quote }}
             - name: NIX_TIMEOUT

@@ -50,10 +50,10 @@ index bfee668..cfeb1f5 100644
  	path := "manifests/" + key
  	_, size, err := s.Storage.Persist(ctx, path, manifest.ManifestType, func(w io.Writer) (string, int64, error) {
 diff --git a/cmd/server/main.go b/cmd/server/main.go
-index bf47a34..f89d595 100644
+index bf47a34..8c4a2e1 100644
 --- a/cmd/server/main.go
 +++ b/cmd/server/main.go
-@@ -24,12 +24,14 @@ import (
+@@ -24,14 +24,17 @@ import (
  	"os"
  	"regexp"
  	"text/template"
@@ -67,8 +67,11 @@ index bf47a34..f89d595 100644
 +	"github.com/google/nixery/metrics"
  	"github.com/google/nixery/storage"
  	"github.com/im7mortal/kmutex"
++	"golang.org/x/sync/singleflight"
  )
-@@ -119,6 +121,25 @@ type registryErrors struct {
+ 
+ // ManifestMediaType is the Content-Type used for the manifest itself. This
+@@ -119,6 +122,25 @@ type registryErrors struct {
  	Errors []registryError `json:"errors"`
  }
  
@@ -94,39 +97,65 @@ index bf47a34..f89d595 100644
  func writeError(w http.ResponseWriter, status int, code, message string) {
  	err := registryErrors{
  		Errors: []registryError{
-@@ -142,9 +163,14 @@ func (h *registryHandler) serveManifestTag(w http.ResponseWriter, r *http.Reques
+@@ -133,7 +155,8 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
+ }
+ 
+ type registryHandler struct {
+-	state *builder.State
++	state     *builder.State
++	manifests singleflight.Group
+ }
+ 
+ // Serve a manifest by tag, building it via Nix and populating caches
+@@ -142,9 +165,27 @@ func (h *registryHandler) serveManifestTag(w http.ResponseWriter, r *http.Reque
  	slog.Info("requesting image manifest", "image", name, "tag", tag)
  
  	image := builder.ImageFromName(name, tag)
+-	buildResult, err := builder.BuildImage(r.Context(), h.state, &image)
++	sfKey := h.state.Cfg.Pkgs.CacheKey(image.Packages, image.Tag)
++	if sfKey == "" {
++		sfKey = "manifest:" + image.Name + ":" + image.Tag
++	}
 +	start := time.Now()
- 	buildResult, err := builder.BuildImage(r.Context(), h.state, &image)
++	v, err, shared := h.manifests.Do(sfKey, func() (interface{}, error) {
++		return builder.BuildImage(r.Context(), h.state, &image)
++	})
 +	elapsed := time.Since(start).Seconds()
  
++	var buildResult *builder.BuildResult
++	if v != nil {
++		buildResult = v.(*builder.BuildResult)
++	}
++
  	if err != nil {
-+		metrics.IncBuildAttempted()
-+		metrics.ObserveBuildDuration(elapsed)
-+		metrics.IncBuildFailed()
++		if !shared {
++			metrics.IncBuildAttempted()
++			metrics.ObserveBuildDuration(elapsed)
++			metrics.IncBuildFailed()
++		}
  		writeError(w, 500, "UNKNOWN", "image build failure")
  
  		slog.Error("failed to build image manifest", "err", err, "image", name, "tag", tag)
-@@ -152,6 +178,16 @@ func (h *registryHandler) serveManifestTag(w http.ResponseWriter, r *http.Reques
+@@ -152,6 +193,18 @@ func (h *registryHandler) serveManifestTag(w http.ResponseWriter, r *http.Reque
  		return
  	}
  
-+	if !buildResult.FromCache {
-+		metrics.IncBuildAttempted()
-+		metrics.ObserveBuildDuration(elapsed)
-+		if buildResult.Error != "" {
-+			metrics.IncBuildFailed()
-+		} else {
-+			metrics.IncBuildSucceeded()
++	if !shared {
++		if !buildResult.FromCache {
++			metrics.IncBuildAttempted()
++			metrics.ObserveBuildDuration(elapsed)
++			if buildResult.Error != "" {
++				metrics.IncBuildFailed()
++			} else {
++				metrics.IncBuildSucceeded()
++			}
 +		}
 +	}
 +
  	// Some error types have special handling, which is applied
  	// here.
  	if buildResult.Error == "not_found" {
-@@ -196,16 +232,33 @@ func (h *registryHandler) serveManifestTag(w http.ResponseWriter, r *http.Reques
+@@ -196,16 +249,33 @@ func (h *registryHandler) serveManifestTag(w http.ResponseWriter, r *http.Reque
  		return
  	}
  
@@ -162,7 +191,7 @@ index bf47a34..f89d595 100644
  }
  
  // ServeHTTP dispatches HTTP requests to the matching handlers.
-@@ -292,6 +342,10 @@ func main() {
+@@ -292,6 +362,10 @@ func main() {
  
  	slog.Info("starting Nixery", "version", version, "port", cfg.Port)
  
@@ -231,7 +260,7 @@ index a1511a4..9c81394 100644
  
      # Needs to be updated after every modification of go.mod/go.sum
 -    vendorHash = "sha256-ctAYtsnahB+Nk3gcHM3sYKhRkFTaILrggHo81MJHpx0=";
-+    vendorHash = "sha256-RAmUe1/tyMY2bfMv70QS/gTTvD/151SlTfkOE+nZq/w=";
++    vendorHash = "sha256-0tkc1ZCofjjczDRwVQqMYvUGmzwtOxmwktIa267T69s=";
  
      ldflags = [
        "-s"
@@ -239,12 +268,13 @@ diff --git a/go.mod b/go.mod
 index d167363..d701d61 100644
 --- a/go.mod
 +++ b/go.mod
-@@ -11,6 +11,7 @@ require (
+@@ -11,6 +11,8 @@ require (
  	github.com/google/go-cmp v0.7.0
  	github.com/im7mortal/kmutex v1.0.2
  	github.com/pkg/xattr v0.4.12
 +	github.com/prometheus/client_golang v1.22.0
  	golang.org/x/oauth2 v0.30.0
++	golang.org/x/sync v0.12.0
  	gonum.org/v1/gonum v0.16.0
  )
 @@ -34,19 +35,25 @@ require (
@@ -352,7 +382,16 @@ index 4288c22..9437af3 100644
  golang.org/x/oauth2 v0.0.0-20180821212333-d2e6202438be/go.mod h1:N/0e6XlmueqKjAGxoOufVs8QHGRruUQn6yWY3a++T0U=
  golang.org/x/oauth2 v0.0.0-20190226205417-e64efc72b421/go.mod h1:gOpvHmFTYa4IltrdGE7lF6nIHvwfUNPOp7c8zoXwtLw=
  golang.org/x/oauth2 v0.0.0-20190604053449-0f29369cfe45/go.mod h1:gOpvHmFTYa4IltrdGE7lF6nIHvwfUNPOp7c8zoXwtLw=
-@@ -414,8 +438,9 @@ golang.org/x/sys v0.0.0-20220128215802-99c3d69c2c27/go.mod h1:oPkhp1MJrh7nUepCBc
+@@ -361,6 +385,8 @@
+ golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
+ golang.org/x/sync v0.0.0-20201207232520-09787c993a3a/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
+ golang.org/x/sync v0.0.0-20210220032951-036812b2e83c/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
++golang.org/x/sync v0.12.0 h1:MHc5BpPuC30uJk597Ri8TV3CNZcTLu6B6z4lJy+g6Jw=
++golang.org/x/sync v0.12.0/go.mod h1:1dzgHSNfp02xaA81J2MS99Qcpr2w7fw1gpm99rleRqA=
+ golang.org/x/sys v0.0.0-20180830151530-49385e6e1522/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
+ golang.org/x/sys v0.0.0-20190215142949-d0b11bdaac8a/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
+ golang.org/x/sys v0.0.0-20190312061237-fead79001313/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+@@ -414,8 +440,9 @@
  golang.org/x/sys v0.0.0-20220209214540-3681064d5158/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
  golang.org/x/sys v0.0.0-20220227234510-4e6760a101f9/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
  golang.org/x/sys v0.0.0-20220328115105-d36c6a25d886/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
@@ -363,7 +402,7 @@ index 4288c22..9437af3 100644
  golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1/go.mod h1:bj7SfCRtBDWHUb9snDiAeCFNEtKQo2Wmx5Cou7ajbmo=
  golang.org/x/term v0.0.0-20210927222741-03fcf44c2211/go.mod h1:jbD1KX2456YbFQfuXm/mYQcufACuNUgVhRMnK/tPxf8=
  golang.org/x/text v0.0.0-20170915032832-14c0d48ead0c/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
-@@ -651,14 +676,17 @@ google.golang.org/protobuf v1.25.0/go.mod h1:9JNX74DMeImyA3h4bdi1ymwjUzf21/xIlba
+@@ -651,14 +678,17 @@ google.golang.org/protobuf v1.25.0/go.mod h1:9JNX74DMeImyA3h4bdi1ymwjUzf21/xIlba
  google.golang.org/protobuf v1.26.0-rc.1/go.mod h1:jlhhOSvTdKEhbULTjvd4ARK9grFBp09yW+WbY/TyQbw=
  google.golang.org/protobuf v1.26.0/go.mod h1:9q0QmTI4eRPtz6boOQmLYwt+qCgq0jsYwAQnmE0givc=
  google.golang.org/protobuf v1.27.1/go.mod h1:9q0QmTI4eRPtz6boOQmLYwt+qCgq0jsYwAQnmE0givc=

@@ -7,7 +7,7 @@ fullnameOverride: nixery-ci
 
 image:
   repository: ghcr.io/builderhub/nixery-helm/nixery
-  tag: fb8bef2c1003ae7ccbe5e2bb9d99fdcf63f09281
+  tag: dc82d08a58ea237edf7a43274642fc3b6c6ab11a
   # Use local image after `kind load` in CI; avoids re-pulling private GHCR inside the cluster.
   pullPolicy: IfNotPresent
 

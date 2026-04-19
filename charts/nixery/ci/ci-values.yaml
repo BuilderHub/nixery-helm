@@ -1,5 +1,6 @@
 # Values for CI (Kind), `helm lint -f`, and `helm template` smoke tests.
 # Keep repository:tag in sync with NIXERY_IMAGE in .github/workflows/on-pr.yaml (Kind loads that image locally).
+# The image must be built from this repo (nixery overlay with metrics patch) so /metrics e2e checks pass.
 replicaCount: 1
 
 fullnameOverride: nixery-ci
@@ -13,6 +14,10 @@ image:
 service:
   type: ClusterIP
   port: 8080
+
+metrics:
+  enabled: true
+  path: /metrics
 
 nixery:
   channel: "nixpkgs-unstable"

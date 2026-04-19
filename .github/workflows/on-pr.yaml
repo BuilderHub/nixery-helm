@@ -86,6 +86,8 @@ jobs:
       - name: Create KinD cluster
         uses: helm/kind-action@v1.14.0
 
+      # Image tag must match charts/nixery/ci/ci-values.yaml image.tag and include a build with the metrics patch
+      # (otherwise GET /metrics returns 404 and the verify step fails).
       - name: Pull Nixery image and load into Kind
         env:
           NIXERY_IMAGE: ghcr.io/builderhub/nixery-helm/nixery:bdc51e7fe8f1ceb2138e5126dad2cb9ace8f2928
@@ -123,6 +125,26 @@ jobs:
           export DOCKER_CLIENT_TIMEOUT=3600
           docker pull "${REGISTRY}/shell:latest"
           docker pull "${REGISTRY}/arm64/shell:latest"
+
+          METRICS_PATH="/metrics"
+          METRICS_BODY=$(curl -sfS --max-time 10 "http://${REGISTRY}${METRICS_PATH}")
+          for pair in \
+            "nixery_builds_attempted_total counter" \
+            "nixery_builds_succeeded_total counter" \
+            "nixery_builds_failed_total counter" \
+            "nixery_build_duration_seconds histogram" \
+            "nixery_manifests_served_total counter" \
+            "nixery_manifest_response_bytes_total counter" \
+            "nixery_blob_response_bytes_total counter"
+          do
+            name="${pair%% *}"
+            typ="${pair#* }"
+            grep -qE "^# TYPE ${name} ${typ}" <<< "${METRICS_BODY}" || {
+              echo "missing or wrong TYPE for ${name} (expected ${typ})" >&2
+              exit 1
+            }
+          done
+          awk '/^nixery_manifests_served_total / { if ($2 > 0) ok=1 } END { if (!ok) { print "nixery_manifests_served_total should be > 0 after pulls" >&2; exit 1 } }' <<< "${METRICS_BODY}"
 
       - name: Debug cluster
         if: always()

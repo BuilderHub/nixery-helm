@@ -28,6 +28,12 @@ kubectl port-forward -n nixery svc/nixery 8080:8080
 curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/v2/
 ```
 
+With [`metrics.enabled`](charts/nixery/values.yaml) (default `true`) and a compatible image, Prometheus metrics are exposed on the same port (by default at `/metrics`):
+
+```bash
+curl -sS http://127.0.0.1:8080/metrics | grep -E '^# TYPE nixery_'
+```
+
 For S3/GCS, more replicas, ingress, or other options, use the values reference below.
 
 ## Values reference
@@ -52,6 +58,8 @@ These are the knobs people actually touch. See [`charts/nixery/values.yaml`](cha
 | `service.type` | `ClusterIP`, `NodePort`, `LoadBalancer`, etc. |
 | `service.port` | Service port and `PORT` env (must match what the process listens on). |
 | `service.annotations` | Service annotations (e.g. cloud LB hints). |
+| `metrics.enabled` | `NIXERY_METRICS_ENABLED` — when `true`, serves Prometheus text exposition at `metrics.path` (default `true`). Requires an image built from this repo’s Nix overlay (includes the metrics patch). |
+| `metrics.path` | `NIXERY_METRICS_PATH` — URL path for metrics (default `/metrics`). |
 | `ingress.enabled` | Turn on an Ingress. |
 | `ingress.className` | IngressClass name. |
 | `ingress.annotations` / `hosts` / `tls` | Standard Ingress wiring. |

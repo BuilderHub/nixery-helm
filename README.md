@@ -35,7 +35,7 @@ For S3/GCS, more replicas, ingress, or other options, use the values reference b
 These are the knobs people actually touch. See [`charts/nixery/values.yaml`](charts/nixery/values.yaml) for the full file and defaults.
 
 | Key | What it does |
-|-----|----------------|
+| --- | --- |
 | `replicaCount` | Pod count. Use `1` with `filesystem` storage; use `2+` only with `s3` or `gcs` so layers are shared. |
 | `image.repository` | Container image (default `ghcr.io/builderhub/nixery-helm/nixery`). |
 | `image.tag` | Image tag. |
@@ -87,7 +87,36 @@ These are the knobs people actually touch. See [`charts/nixery/values.yaml`](cha
 | `extraVolumes` / `extraVolumeMounts` | Attach arbitrary volumes. |
 | `extraEnvFrom` | Extra `envFrom` (e.g. ConfigMaps). |
 
+## Dynamic flake packages
+
+Images built from this chart's patched Nixery image can include a package from a
+GitHub flake by encoding the flake reference as one package path component:
+
+```text
+flake--github--OWNER--REPO--PACKAGE--REF
+```
+
+For example:
+
+```bash
+docker pull nixery.example.com/shell/flake--github--coreweave--buildweave--default--main
+```
+
+This resolves `github:coreweave/buildweave/main` and includes
+`packages.${system}.default` in the image. Keep `shell`, `arm64`, and normal
+nixpkgs package names as separate path components.
+
+Dynamic flake packages require flakes to be enabled in `nixery.nixConfig`:
+
+```yaml
+nixery:
+  nixConfig: |
+    experimental-features = nix-command flakes
+```
+
+For private GitHub flakes, mount credentials for Git, such as `/root/.netrc` or a
+global Git config, and set `HOME=/root` through `nixery.extraEnv`.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
-

@@ -42,22 +42,14 @@ diff --git a/prepare-image/load-pkgs.nix b/prepare-image/load-pkgs.nix
 index d407e82..831a7d0 100644
 --- a/prepare-image/load-pkgs.nix
 +++ b/prepare-image/load-pkgs.nix
-@@ -15,6 +15,9 @@ let
-  in
-  import (fetchTarball url) importArgs;
- 
-+ # If a channel URL is requested, it is fetched directly as a tarball.
+@@ -23,1 +23,3 @@
+- fetchImportGit = spec: import (fetchGit spec) importArgs;
 + fetchImportURL = url: import (fetchTarball url) importArgs;
 +
-  # If a git repository is requested, it is retrieved via
-  # builtins.fetchGit which defaults to the git configuration of the
-  # outside environment. This means that user-configured SSH
-@@ -27,6 +30,8 @@ let
- in
- if srcType == "nixpkgs" then
-  fetchImportChannel srcArgs
++ fetchImportGit = spec: import (fetchGit spec) importArgs;
+@@ -31,2 +33,4 @@
+-else if srcType == "git" then
 +else if srcType == "url" then
 + fetchImportURL srcArgs
- else if srcType == "git" then
++else if srcType == "git" then
   fetchImportGit (fromJSON srcArgs)
- else if srcType == "path" then

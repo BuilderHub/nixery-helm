@@ -1,0 +1,63 @@
+diff --git a/config/pkgsource.go b/config/pkgsource.go
+index 7b3c202..e07b0a7 100644
+--- a/config/pkgsource.go
++++ b/config/pkgsource.go
+@@ -76,6 +76,20 @@ func (n *NixChannel) CacheKey(pkgs []string, tag string) string {
+ 	return hashed
+ }
+ 
++type ChannelURL struct {
++	url string
++}
++
++func (c *ChannelURL) Render(tag string) (string, string) {
++	return "url", c.url
++}
++
++func (c *ChannelURL) CacheKey(pkgs []string, tag string) string {
++	// Channel URLs are often moving targets, so avoid caching full manifests by
++	// source URL unless the package source is pinned through another mechanism.
++	return ""
++}
++
+ type PkgsPath struct {
+ 	path string
+ }
+@@ -106,6 +120,14 @@ func pkgSourceFromEnv() (PkgSource, error) {
+ 	}, nil
+ 	}
+ 
++	if channelURL := os.Getenv("NIXERY_CHANNEL_URL"); channelURL != "" {
++		slog.Info("using Nix package set from channel URL", "url", channelURL)
++
++		return &ChannelURL{
++			url: channelURL,
++		}, nil
++	}
++
+ 	if git := os.Getenv("NIXERY_PKGS_REPO"); git != "" {
+ 	slog.Info("using Nix package set from git repository", "repo", git)
+ 
+diff --git a/prepare-image/load-pkgs.nix b/prepare-image/load-pkgs.nix
+index d407e82..831a7d0 100644
+--- a/prepare-image/load-pkgs.nix
++++ b/prepare-image/load-pkgs.nix
+@@ -15,6 +15,9 @@ let
+  in
+  import (fetchTarball url) importArgs;
+ 
++ # If a channel URL is requested, it is fetched directly as a tarball.
++ fetchImportURL = url: import (fetchTarball url) importArgs;
++
+  # If a git repository is requested, it is retrieved via
+  # builtins.fetchGit which defaults to the git configuration of the
+  # outside environment. This means that user-configured SSH
+@@ -27,6 +30,8 @@ let
+ in
+ if srcType == "nixpkgs" then
+  fetchImportChannel srcArgs
++else if srcType == "url" then
++ fetchImportURL srcArgs
+ else if srcType == "git" then
+  fetchImportGit (fromJSON srcArgs)
+ else if srcType == "path" then

@@ -63,6 +63,7 @@ autoscaling:
 
 nixery:
   channel: "nixpkgs-unstable"
+  channelUrl: ""
   pkgsRepo: ""
   pkgsPath: ""
   timeout: "3600"

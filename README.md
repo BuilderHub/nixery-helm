@@ -61,7 +61,8 @@ These are the knobs people actually touch. See [`charts/nixery/values.yaml`](cha
 | `podDisruptionBudget.minAvailable` | PDB `minAvailable`. |
 | `autoscaling.*` | Optional HPA (needs at least one of CPU or memory target). |
 | `nixery.channel` | `NIXERY_CHANNEL` — Nixpkgs channel or pinned commit string. |
-| `nixery.pkgsRepo` | `NIXERY_PKGS_REPO` — git URL for a custom package set (only one of channel / repo / path). |
+| `nixery.channelUrl` | `NIXERY_CHANNEL_URL` — arbitrary channel tarball URL to import as the package set. |
+| `nixery.pkgsRepo` | `NIXERY_PKGS_REPO` — git URL for a custom package set (only one of channel / channel URL / repo / path). |
 | `nixery.pkgsPath` | `NIXERY_PKGS_PATH` — local path inside the image (unusual in Kubernetes). |
 | `nixery.timeout` | `NIX_TIMEOUT` (seconds per Nix build). |
 | `nixery.popularityUrl` | `NIX_POPULARITY_URL` if you use popularity data. |

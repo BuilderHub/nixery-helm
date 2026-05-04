@@ -69,17 +69,19 @@ Validate replica count vs filesystem backend
 
 {{- define "nixery.validatePkgSource" -}}
 {{- $ch := .Values.nixery.channel | default "" | trim }}
+{{- $chURL := .Values.nixery.channelUrl | default "" | trim }}
 {{- $repo := .Values.nixery.pkgsRepo | default "" | trim }}
 {{- $path := .Values.nixery.pkgsPath | default "" | trim }}
 {{- $n := 0 }}
 {{- if ne $ch "" }}{{ $n = add1 $n }}{{- end }}
+{{- if ne $chURL "" }}{{ $n = add1 $n }}{{- end }}
 {{- if ne $repo "" }}{{ $n = add1 $n }}{{- end }}
 {{- if ne $path "" }}{{ $n = add1 $n }}{{- end }}
 {{- if eq $n 0 }}
-{{- fail "nixery: set exactly one of nixery.channel, nixery.pkgsRepo, or nixery.pkgsPath" }}
+{{- fail "nixery: set exactly one of nixery.channel, nixery.channelUrl, nixery.pkgsRepo, or nixery.pkgsPath" }}
 {{- end }}
 {{- if gt $n 1 }}
-{{- fail "nixery: only one of nixery.channel, nixery.pkgsRepo, or nixery.pkgsPath may be set (set unused fields to empty string)" }}
+{{- fail "nixery: only one of nixery.channel, nixery.channelUrl, nixery.pkgsRepo, or nixery.pkgsPath may be set (set unused fields to empty string)" }}
 {{- end }}
 {{- end }}
 

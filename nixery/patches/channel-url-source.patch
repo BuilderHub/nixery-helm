@@ -39,17 +39,12 @@ index 7b3c202..e07b0a7 100644
  	slog.Info("using Nix package set from git repository", "repo", git)
  
 diff --git a/prepare-image/load-pkgs.nix b/prepare-image/load-pkgs.nix
-index d407e82..831a7d0 100644
+index d407e82..004515e 100644
 --- a/prepare-image/load-pkgs.nix
 +++ b/prepare-image/load-pkgs.nix
-@@ -23,1 +23,3 @@
-- fetchImportGit = spec: import (fetchGit spec) importArgs;
-+ fetchImportURL = url: import (fetchTarball url) importArgs;
-+
-+ fetchImportGit = spec: import (fetchGit spec) importArgs;
-@@ -31,2 +33,4 @@
+@@ -31,2 +31,4 @@
 -else if srcType == "git" then
 +else if srcType == "url" then
-+ fetchImportURL srcArgs
++ import (fetchTarball srcArgs) importArgs
 +else if srcType == "git" then
   fetchImportGit (fromJSON srcArgs)

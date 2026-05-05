@@ -106,6 +106,7 @@
       "type": "object",
       "properties": {
         "channel": { "type": "string" },
+        "channelUrl": { "type": "string" },
         "pkgsRepo": { "type": "string" },
         "pkgsPath": { "type": "string" },
         "timeout": { "type": "string" },

@@ -85,11 +85,16 @@ spec:
               value: {{ .Values.nixery.popularityUrl | quote }}
             {{- end }}
             {{- $ch := .Values.nixery.channel | default "" | trim }}
+            {{- $chURL := .Values.nixery.channelUrl | default "" | trim }}
             {{- $repo := .Values.nixery.pkgsRepo | default "" | trim }}
             {{- $path := .Values.nixery.pkgsPath | default "" | trim }}
             {{- if ne $ch "" }}
             - name: NIXERY_CHANNEL
               value: {{ $ch | quote }}
+            {{- end }}
+            {{- if ne $chURL "" }}
+            - name: NIXERY_CHANNEL_URL
+              value: {{ $chURL | quote }}
             {{- end }}
             {{- if ne $repo "" }}
             - name: NIXERY_PKGS_REPO

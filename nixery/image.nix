@@ -16,6 +16,16 @@ let
 export NIX_SSL_CERT_FILE=''${cacert}/etc/ssl/certs/ca-bundle.crt
 export GIT_SSL_CAINFO=''${cacert}/etc/ssl/certs/ca-bundle.crt'
 
+      substituteInPlace default.nix \
+        --replace 'config.Cmd = [ "''${nixery-launch-script}/bin/nixery" ];' 'config = {
+ Cmd = [ "''${nixery-launch-script}/bin/nixery" ];
+ Env = [
+   "SSL_CERT_FILE=''${cacert}/etc/ssl/certs/ca-bundle.crt"
+   "NIX_SSL_CERT_FILE=''${cacert}/etc/ssl/certs/ca-bundle.crt"
+   "GIT_SSL_CAINFO=''${cacert}/etc/ssl/certs/ca-bundle.crt"
+ ];
+};'
+
       substituteInPlace prepare-image/prepare-image.nix \
         --replace ' deepFetch = with lib; s: n:' ' # Dynamic flake package components are encoded into a single Docker path
  # component so they do not collide with the Nixery "/" package separator.

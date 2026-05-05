@@ -46,4 +46,11 @@ let
     '';
   };
 in
-(import "${patched}/default.nix" { inherit pkgs; }).nixery-image
+(import "${patched}/default.nix" {
+  inherit pkgs;
+  preLaunch = ''
+    export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
+    export NIX_SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
+    export GIT_SSL_CAINFO=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
+  '';
+}).nixery-image

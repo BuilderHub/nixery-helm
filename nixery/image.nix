@@ -11,6 +11,11 @@ let
       ./patches/channel-url-source.patch
     ];
     postPatch = ''
+      substituteInPlace default.nix \
+        --replace 'export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt' 'export SSL_CERT_FILE=''${cacert}/etc/ssl/certs/ca-bundle.crt
+export NIX_SSL_CERT_FILE=''${cacert}/etc/ssl/certs/ca-bundle.crt
+export GIT_SSL_CAINFO=''${cacert}/etc/ssl/certs/ca-bundle.crt'
+
       substituteInPlace prepare-image/prepare-image.nix \
         --replace ' deepFetch = with lib; s: n:' ' # Dynamic flake package components are encoded into a single Docker path
  # component so they do not collide with the Nixery "/" package separator.
@@ -46,11 +51,4 @@ let
     '';
   };
 in
-(import "${patched}/default.nix" {
-  inherit pkgs;
-  preLaunch = ''
-    export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
-    export NIX_SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
-    export GIT_SSL_CAINFO=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
-  '';
-}).nixery-image
+(import "${patched}/default.nix" { inherit pkgs; }).nixery-image

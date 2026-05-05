@@ -69,8 +69,17 @@ spec:
               value: {{ .Values.storage.backend | quote }}
             - name: NIX_TIMEOUT
               value: {{ .Values.nixery.timeout | quote }}
+            {{- $nc := .Values.nixery.nixConfig }}
+            {{- if and (kindIs "map" $nc) (hasKey $nc "existingSecret") }}
             - name: NIX_CONFIG
-              value: {{ .Values.nixery.nixConfig | default "sandbox = true\nfilter-syscalls = true" | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $nc.existingSecret.name | quote }}
+                  key: {{ $nc.existingSecret.key | quote }}
+            {{- else }}
+            - name: NIX_CONFIG
+              value: {{ $nc | default "sandbox = true\nfilter-syscalls = true" | quote }}
+            {{- end }}
             {{- if .Values.nixery.popularityUrl }}
             - name: NIX_POPULARITY_URL
               value: {{ .Values.nixery.popularityUrl | quote }}

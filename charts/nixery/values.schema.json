@@ -110,7 +110,27 @@
         "pkgsPath": { "type": "string" },
         "timeout": { "type": "string" },
         "popularityUrl": { "type": "string" },
-        "nixConfig": { "type": "string" },
+        "nixConfig": {
+          "oneOf": [
+            { "type": "string" },
+            {
+              "type": "object",
+              "properties": {
+                "existingSecret": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string", "minLength": 1 },
+                    "key": { "type": "string", "minLength": 1 }
+                  },
+                  "required": ["name", "key"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["existingSecret"],
+              "additionalProperties": false
+            }
+          ]
+        },
         "securityContext": {
           "type": ["object", "null"]
         },

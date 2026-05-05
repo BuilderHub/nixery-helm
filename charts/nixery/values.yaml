@@ -70,6 +70,11 @@ nixery:
   # Optional container securityContext. Null: not rendered; Kubernetes defaults apply (non-privileged).
   securityContext: null
   # Appended to nix.conf via NIX_CONFIG. Stricter sandboxing; relax if builds fail on your cluster.
+  # nixConfig may be a multi-line string (inline) OR an object pointing at an existing Secret:
+  #   nixConfig:
+  #     existingSecret:
+  #       name: my-nix-config
+  #       key: nix.conf
   nixConfig: |
     sandbox = true
     filter-syscalls = true

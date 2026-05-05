@@ -65,7 +65,7 @@ These are the knobs people actually touch. See [`charts/nixery/values.yaml`](cha
 | `nixery.pkgsPath` | `NIXERY_PKGS_PATH` — local path inside the image (unusual in Kubernetes). |
 | `nixery.timeout` | `NIX_TIMEOUT` (seconds per Nix build). |
 | `nixery.popularityUrl` | `NIX_POPULARITY_URL` if you use popularity data. |
-| `nixery.nixConfig` | Extra `nix.conf` lines merged into the `NIX_CONFIG` environment variable. |
+| `nixery.nixConfig` | Extra `nix.conf` lines merged into the `NIX_CONFIG` environment variable. Accepts either an inline string or `{ existingSecret: { name, key } }` to source the value from an existing Secret via `secretKeyRef`. |
 | `nixery.securityContext` | Optional container-level `securityContext`. |
 | `nixery.extraEnv` | Extra `env` entries (list of name/value or valueFrom maps). |
 | `storage.backend` | `filesystem`, `s3`, or `gcs`. |

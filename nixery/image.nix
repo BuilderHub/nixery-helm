@@ -6,8 +6,7 @@ let
     name = "nixery-patched";
     src = ../nixery-src;
     patches = [
-      ./patches/s3-use-path-style-env.patch
-      ./patches/s3-putobject-spool-seekable.patch
+      ./patches/manifest-content-length.patch
     ];
   };
 in

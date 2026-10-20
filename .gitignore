@@ -1,2 +1,4 @@
 # Local upstream clone for nix-build nixery/image.nix (CI uses actions/checkout)
 nixery-src/
+*result*
+

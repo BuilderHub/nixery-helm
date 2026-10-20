@@ -15,10 +15,18 @@ defaults:
 
 jobs:
   build-nixery-image:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: amd64
+            runs-on: ubuntu-latest
+          - platform: arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
     env:
       # Keep in sync with build-nixery.yaml workflow_dispatch default for nixery-ref
-      NIXERY_SRC_REF: 7eb6caf6c9de3d760351edaa9cb78debe4221dbd
+      NIXERY_SRC_REF: 669251b3e641d5abb9720693515d0d2b1586e4b4
     permissions:
       contents: read
       id-token: write
@@ -45,22 +53,40 @@ jobs:
             --option sandbox false \
             --max-jobs 2
           ls -lh result
+          cp -L "$(readlink -f result)" nixery-image.tar
+          ls -lh nixery-image.tar
+
+      - name: Upload nixery image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nixery-image-${{ matrix.platform }}
+          path: nixery-image.tar
+          retention-days: 1
 
   test-chart:
+    needs: build-nixery-image
     runs-on: ${{ matrix.runs-on }}
     env:
       # Port on the runner for kubectl port-forward (HTTP registry; must match insecure-registries).
       NIXERY_PULL_PORT: "15555"
+      NIXERY_IMAGE: nixery:ci
     permissions:
       contents: read
-      packages: read
     strategy:
+      fail-fast: false
       matrix:
-        runs-on:
-          - ubuntu-latest
-          - ubuntu-24.04-arm
+        include:
+          - platform: amd64
+            runs-on: ubuntu-latest
+          - platform: arm64
+            runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v6
+
+      - name: Download nixery image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nixery-image-${{ matrix.platform }}
 
       - name: Set up Helm
         uses: azure/setup-helm@v5
@@ -86,13 +112,13 @@ jobs:
       - name: Create KinD cluster
         uses: helm/kind-action@v1.14.0
 
-      - name: Pull Nixery image and load into Kind
-        env:
-          NIXERY_IMAGE: ghcr.io/builderhub/nixery-helm/nixery:bdc51e7fe8f1ceb2138e5126dad2cb9ace8f2928
+      - name: Load Nixery image into Kind
         run: |
           set -euo pipefail
-          docker pull "$NIXERY_IMAGE"
-          kind load docker-image "$NIXERY_IMAGE" --name chart-testing
+          LOADED="$(docker load -i nixery-image.tar | sed -n 's/^Loaded image: //p')"
+          test -n "${LOADED}"
+          docker tag "${LOADED}" "${NIXERY_IMAGE}"
+          kind load docker-image "${NIXERY_IMAGE}" --name chart-testing
 
       - name: Install chart
         run: |
@@ -131,4 +157,3 @@ jobs:
           kubectl -n nixery-test get events --sort-by='.lastTimestamp' || true
           kubectl -n nixery-test describe pod -l app.kubernetes.io/name=nixery || true
           kubectl -n nixery-test logs -l app.kubernetes.io/name=nixery --tail=200 || true
-

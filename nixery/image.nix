@@ -1,6 +1,13 @@
-# Build nixery-image from upstream sources in ../nixery-src.
+# Build nixery-image from upstream sources in ../nixery-src with patches applied.
 # CI checks out tazjin/nixery into nixery-src; local builds need the same layout.
 let
   pkgs = import <nixpkgs> { };
+  patched = pkgs.applyPatches {
+    name = "nixery-patched";
+    src = ../nixery-src;
+    patches = [
+      ./patches/manifest-content-length.patch
+    ];
+  };
 in
-(import ../nixery-src/default.nix { inherit pkgs; }).nixery-image
+(import "${patched}/default.nix" { inherit pkgs; }).nixery-image

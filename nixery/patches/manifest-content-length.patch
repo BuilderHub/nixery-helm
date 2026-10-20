@@ -1,0 +1,11 @@
+--- a/cmd/server/main.go
++++ b/cmd/server/main.go
+@@ -229,6 +229,8 @@
+ 		return
+ 	}
+
++	// Docker requires Content-Length when Docker-Content-Digest is set.
++	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(manifest)))
+ 	w.Write(manifest)
+ }
+ 

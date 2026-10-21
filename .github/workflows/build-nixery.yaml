@@ -4,8 +4,8 @@ name: Build Nixery (Nix)
 "on":
   workflow_dispatch:
     inputs:
-      tag:
-        description: Image tag (leave empty to use the workflow commit SHA)
+      tags:
+        description: "Image tags, comma-separated (leave empty to use the workflow commit SHA)"
         type: string
         required: false
         default: ""
@@ -31,7 +31,7 @@ name: Build Nixery (Nix)
         default: "https://github.com/NixOS/nixpkgs/archive/nixpkgs-unstable.tar.gz"
   workflow_call:
     inputs:
-      tag:
+      tags:
         type: string
         required: false
         default: ""
@@ -72,18 +72,32 @@ jobs:
       id-token: write
       packages: write
     steps:
-      - name: Resolve tag and image name
+      - name: Resolve tags and image name
         id: meta
         env:
-          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_TAGS: ${{ inputs.tags }}
           INPUT_IMAGE_REPO: ${{ inputs['image-repository'] }}
         run: |
           set -euo pipefail
-          TAG="${INPUT_TAG}"
-          if [ -z "${TAG}" ]; then
-            TAG="${GITHUB_SHA}"
+          RAW="${INPUT_TAGS}"
+          if [ -z "${RAW}" ]; then
+            RAW="${GITHUB_SHA}"
           fi
-          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          IFS=',' read -ra parts <<< "${RAW}"
+          normalized=()
+          for raw in "${parts[@]}"; do
+            t="${raw#"${raw%%[![:space:]]*}"}"
+            t="${t%"${t##*[![:space:]]}"}"
+            if [ -n "${t}" ]; then
+              normalized+=("${t}")
+            fi
+          done
+          if [ "${#normalized[@]}" -eq 0 ]; then
+            normalized=("${GITHUB_SHA}")
+          fi
+          echo "tag=${normalized[0]}" >> "${GITHUB_OUTPUT}"
+          joined="$(IFS=','; echo "${normalized[*]}")"
+          echo "tags=${joined}" >> "${GITHUB_OUTPUT}"
 
           IR="${INPUT_IMAGE_REPO}"
           if [ -z "${IR}" ]; then
@@ -145,18 +159,32 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Resolve tag and image name
+      - name: Resolve tags and image name
         id: meta
         env:
-          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_TAGS: ${{ inputs.tags }}
           INPUT_IMAGE_REPO: ${{ inputs['image-repository'] }}
         run: |
           set -euo pipefail
-          TAG="${INPUT_TAG}"
-          if [ -z "${TAG}" ]; then
-            TAG="${GITHUB_SHA}"
+          RAW="${INPUT_TAGS}"
+          if [ -z "${RAW}" ]; then
+            RAW="${GITHUB_SHA}"
           fi
-          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          IFS=',' read -ra parts <<< "${RAW}"
+          normalized=()
+          for raw in "${parts[@]}"; do
+            t="${raw#"${raw%%[![:space:]]*}"}"
+            t="${t%"${t##*[![:space:]]}"}"
+            if [ -n "${t}" ]; then
+              normalized+=("${t}")
+            fi
+          done
+          if [ "${#normalized[@]}" -eq 0 ]; then
+            normalized=("${GITHUB_SHA}")
+          fi
+          echo "tag=${normalized[0]}" >> "${GITHUB_OUTPUT}"
+          joined="$(IFS=','; echo "${normalized[*]}")"
+          echo "tags=${joined}" >> "${GITHUB_OUTPUT}"
 
           IR="${INPUT_IMAGE_REPO}"
           if [ -z "${IR}" ]; then
@@ -177,11 +205,16 @@ jobs:
 
       - name: Create and push multi-arch manifest
         env:
-          DEST: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
-          DEST_AMD64: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}-amd64
-          DEST_ARM64: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}-arm64
+          IMAGE: ${{ steps.meta.outputs.image }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           set -euo pipefail
           docker buildx version
-          docker buildx imagetools create -t "${DEST}" "${DEST_AMD64}" "${DEST_ARM64}"
-          docker buildx imagetools inspect "${DEST}"
+          args=()
+          IFS=',' read -ra tags <<< "${TAGS}"
+          for t in "${tags[@]}"; do
+            args+=(-t "${IMAGE}:${t}")
+          done
+          docker buildx imagetools create "${args[@]}" "${IMAGE}:${TAG}-amd64" "${IMAGE}:${TAG}-arm64"
+          docker buildx imagetools inspect "${IMAGE}:${TAG}"

@@ -11,7 +11,17 @@ defaults:
     shell: bash
 
 jobs:
+  build-image:
+    uses: ./.github/workflows/build-nixery.yaml
+    with:
+      tags: ${{ github.event.release.tag_name }},${{ github.sha }},latest
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+
   publish:
+    needs: build-image
     runs-on: ubuntu-latest
     permissions:
       contents: read
